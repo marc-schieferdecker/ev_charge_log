@@ -1,10 +1,10 @@
 {
   "domain": "ev_charge_log",
   "name": "EV Charge Log",
+  "after_dependencies": ["frontend", "panel_custom"],
   "categories": ["energy.ev_charging", "vehicles_transport.cars_evs"],
   "codeowners": ["@marc-schieferdecker"],
   "config_flow": true,
-  "after_dependencies": ["frontend", "panel_custom"],
   "dependencies": ["http", "persistent_notification", "websocket_api"],
   "documentation": "https://github.com/marc-schieferdecker/ev_charge_log",
   "integration_type": "service",
