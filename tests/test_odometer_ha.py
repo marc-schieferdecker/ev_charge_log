@@ -124,3 +124,15 @@ async def test_panel_shows_cost_per_100_instead_of_count(hass: HomeAssistant) ->
     keys = [row["entity"] for row in seal["stats"]]
     assert _entity(hass, "seal") in keys
     assert not any(e.endswith("_sessions") for e in keys)
+    # The placeholder in the name is filled in (no "{length}" in the panel).
+    names = [row["name"] for row in seal["stats"]]
+    assert "Cost per 100 km" in names
+    assert not any("{" in (name or "") for name in names)
+
+
+async def test_panel_name_in_german(hass: HomeAssistant) -> None:
+    hass.config.language = "de"
+    await _setup(hass)
+    result = await async_panel_data(hass)
+    seal = next(v for v in result["vehicles"] if v["id"] == "seal")
+    assert "Kosten pro 100 km" in [row["name"] for row in seal["stats"]]

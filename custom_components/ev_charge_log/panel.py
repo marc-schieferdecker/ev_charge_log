@@ -217,13 +217,21 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
     panel_texts = await async_get_translations(hass, language, "exceptions", [DOMAIN])
     entity_texts = await async_get_translations(hass, language, "entity", [DOMAIN])
 
+    # Placeholders in entity names, filled like the entities do it.
+    placeholders = {"length": str(hass.config.units.length_unit)}
+
     def label(platform: str, key: str) -> str | None:
         short = panel_texts.get(
             f"component.{DOMAIN}.exceptions.panel_label_{key}.message"
         )
-        return short or entity_texts.get(
+        name = short or entity_texts.get(
             f"component.{DOMAIN}.entity.{platform}.{key}.name"
         )
+        if name is None:
+            return None
+        for placeholder, value in placeholders.items():
+            name = name.replace(f"{{{placeholder}}}", value)
+        return name
 
     def entities(
         vehicle_id: str, spec: tuple[tuple[str, str], ...]
