@@ -13,11 +13,17 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-PLATFORMS: list[str] = []
+PLATFORMS: list[str] = ["sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up EV Charge Log from a config entry."""
+    from .coordinator import EvChargeLogCoordinator
+
+    coordinator = EvChargeLogCoordinator(hass, entry)
+    await coordinator.async_load()
+    entry.runtime_data = coordinator
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Adding, changing or removing a vehicle/tariff subentry fires the update
     # listener; reload so entities follow the configuration.

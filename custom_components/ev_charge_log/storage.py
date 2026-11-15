@@ -173,6 +173,14 @@ class SessionLog:
         del self._sessions[session.id]
         return session
 
+    def remove_other_vehicles(self, vehicle_ids: Iterable[str]) -> int:
+        """Delete sessions of vehicles not in `vehicle_ids`; return the count."""
+        keep = set(vehicle_ids)
+        orphans = [s.id for s in self._sessions.values() if s.vehicle_id not in keep]
+        for session_id in orphans:
+            del self._sessions[session_id]
+        return len(orphans)
+
     def _resolve(self, vehicle_id: str, session_id: str | None) -> Session:
         if session_id is None:
             session = self.last_session(vehicle_id)

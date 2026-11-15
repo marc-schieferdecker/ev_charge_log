@@ -84,5 +84,22 @@
         "name_exists": "Einen Tarif mit diesem Namen gibt es bereits."
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "total_cost": { "name": "Gesamtkosten" },
+      "total_energy": { "name": "Gesamtenergie" },
+      "average_price": { "name": "Durchschnittspreis" },
+      "session_count": { "name": "Ladungen" },
+      "last_session_cost": { "name": "Letzte Ladung Kosten" },
+      "last_session_energy": { "name": "Letzte Ladung Energie" },
+      "last_session_time": { "name": "Letzte Ladung" },
+      "last_session_tariff": { "name": "Letzte Ladung Tarif" },
+      "last_session_soc_points": { "name": "Letzte Ladung SoC geladen" },
+      "last_session_charging_loss": { "name": "Letzte Ladung Ladeverlust" },
+      "last_session_cost_per_soc_point": { "name": "Letzte Ladung Kosten pro SoC-Prozentpunkt" },
+      "tariff_total_cost": { "name": "Gesamtkosten" },
+      "tariff_total_energy": { "name": "Gesamtenergie" }
+    }
   }
 }

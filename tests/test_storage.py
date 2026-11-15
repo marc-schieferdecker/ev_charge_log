@@ -272,6 +272,16 @@ def test_delete_unknown_id_raises() -> None:
         log.delete("seal_u", "nope")
 
 
+def test_remove_other_vehicles() -> None:
+    log = _log()
+    log.add(_input(), TARIFFS)
+    log.add(_input(vehicle_id="dolphin"), TARIFFS)
+    log.add(_input(vehicle_id="dolphin"), TARIFFS)
+    assert log.remove_other_vehicles(["seal_u"]) == 2
+    assert [s.vehicle_id for s in log.sessions()] == ["seal_u"]
+    assert log.remove_other_vehicles(["seal_u"]) == 0
+
+
 # --- persistence / migration ----------------------------------------------
 
 

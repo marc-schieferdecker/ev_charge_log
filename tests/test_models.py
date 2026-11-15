@@ -177,6 +177,15 @@ def test_soc_out_of_range_is_rejected(soc: float) -> None:
         build_session("s1", _input(tariff_id="enbw", soc_start=soc), ENBW)
 
 
+def test_session_normalizes_numbers_to_float() -> None:
+    session = build_session(
+        "s1", _input(energy_kwh=40, tariff_id="enbw", soc_start=20, soc_end=60), ENBW
+    )
+    assert type(session.energy_kwh) is float
+    assert type(session.soc_start) is float
+    assert type(session.soc_end) is float
+
+
 def test_session_dict_roundtrip() -> None:
     session = build_session(
         "s1",

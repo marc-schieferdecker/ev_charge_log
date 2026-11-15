@@ -124,7 +124,12 @@ class Session:
     source: str = SOURCE_MANUAL
 
     def __post_init__(self) -> None:
-        """Validate the session."""
+        """Normalize numbers to float and validate the session."""
+        # Same types whether built from input (may be int) or loaded from storage.
+        for name in ("energy_kwh", "cost", "price_per_kwh", "soc_start", "soc_end"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, float(value))
         if self.timestamp.tzinfo is None:
             raise ValidationError("timestamp must be timezone-aware")
         if self.energy_kwh <= 0:

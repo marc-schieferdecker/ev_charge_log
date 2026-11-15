@@ -84,5 +84,22 @@
         "name_exists": "A tariff with this name already exists."
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "total_cost": { "name": "Total cost" },
+      "total_energy": { "name": "Total energy" },
+      "average_price": { "name": "Average price" },
+      "session_count": { "name": "Sessions" },
+      "last_session_cost": { "name": "Last session cost" },
+      "last_session_energy": { "name": "Last session energy" },
+      "last_session_time": { "name": "Last session" },
+      "last_session_tariff": { "name": "Last session tariff" },
+      "last_session_soc_points": { "name": "Last session SoC charged" },
+      "last_session_charging_loss": { "name": "Last session charging loss" },
+      "last_session_cost_per_soc_point": { "name": "Last session cost per SoC point" },
+      "tariff_total_cost": { "name": "Total cost" },
+      "tariff_total_energy": { "name": "Total energy" }
+    }
   }
 }
