@@ -55,7 +55,7 @@ Every vehicle gets input entities to book a session:
 | Input cost (optional) | Total amount; overrides the tariff calculation, 0 is allowed |
 | Input tariff | Preset with the vehicle's default tariff |
 | Input charge type | AC or DC; follows the tariff if it has only one price |
-| Input time (optional) | End of charging; empty means the time of booking |
+| Input date (optional) | Day of the session; empty means today. The current time of day is used |
 | Book session | Books the input with the current time and clears it |
 | Reset input | Clears the input without booking |
 

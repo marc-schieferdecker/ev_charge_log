@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 PLATFORMS_BY_KIND: dict[str, list[str]] = {
-    KIND_VEHICLES: ["button", "datetime", "number", "select", "sensor"],
+    KIND_VEHICLES: ["button", "date", "number", "select", "sensor"],
     KIND_TARIFFS: ["sensor"],
 }
 

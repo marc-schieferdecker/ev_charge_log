@@ -104,8 +104,8 @@
       "tariff_total_cost": { "name": "Total cost" },
       "tariff_total_energy": { "name": "Total energy" }
     },
-    "datetime": {
-      "input_time": { "name": "Input time (optional)" }
+    "date": {
+      "input_date": { "name": "Input date (optional)" }
     },
     "number": {
       "input_energy": { "name": "Input energy" },

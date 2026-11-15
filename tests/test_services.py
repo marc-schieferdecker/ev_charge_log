@@ -404,27 +404,32 @@ async def test_book_dc_only_tariff_from_dashboard(hass: HomeAssistant, entry) ->
     assert session.cost == 18.60
 
 
-async def test_book_with_entered_time(hass: HomeAssistant, entry) -> None:
-    time = _entity(hass, "datetime", "seal", "input_time")
-    assert hass.states.get(time).state == "unknown"
-
+async def _set_date(hass: HomeAssistant, entity_id: str, day: str) -> None:
     await hass.services.async_call(
-        "datetime",
-        "set_value",
-        {"entity_id": time, "datetime": "2026-11-14T18:30:00+00:00"},
-        blocking=True,
+        "date", "set_value", {"entity_id": entity_id, "date": day}, blocking=True
     )
+
+
+async def test_book_with_entered_date_keeps_time_of_day(
+    hass: HomeAssistant, entry, freezer
+) -> None:
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to("2026-11-15 17:30:00+00:00")  # 18:30 in Berlin
+    day = _entity(hass, "date", "seal", "input_date")
+    assert hass.states.get(day).state == "unknown"
+
+    await _set_date(hass, day, "2026-11-14")
     await _set(
         hass, "number", _entity(hass, "number", "seal", "input_energy"), value=20
     )
     await _press(hass, _entity(hass, "button", "seal", "book"))
 
     session = entry.runtime_data.log.last_session("seal")
-    assert session.timestamp == datetime(2026, 11, 14, 18, 30, tzinfo=UTC)
-    assert hass.states.get(time).state == "unknown"  # cleared after booking
+    assert session.timestamp.isoformat() == "2026-11-14T18:30:00+01:00"
+    assert hass.states.get(day).state == "unknown"  # cleared after booking
 
 
-async def test_book_without_time_uses_now(hass: HomeAssistant, entry) -> None:
+async def test_book_without_date_uses_now(hass: HomeAssistant, entry) -> None:
     before = dt_util.utcnow()
     await _set(
         hass, "number", _entity(hass, "number", "seal", "input_energy"), value=20
@@ -434,17 +439,25 @@ async def test_book_without_time_uses_now(hass: HomeAssistant, entry) -> None:
     assert before <= session.timestamp <= dt_util.utcnow()
 
 
-async def test_reset_clears_time(hass: HomeAssistant, entry) -> None:
-    time = _entity(hass, "datetime", "seal", "input_time")
-    await hass.services.async_call(
-        "datetime",
-        "set_value",
-        {"entity_id": time, "datetime": "2026-11-14T18:30:00+00:00"},
-        blocking=True,
-    )
-    assert hass.states.get(time).state != "unknown"
+async def test_reset_clears_date(hass: HomeAssistant, entry) -> None:
+    day = _entity(hass, "date", "seal", "input_date")
+    await _set_date(hass, day, "2026-11-14")
+    assert hass.states.get(day).state == "2026-11-14"
     await _press(hass, _entity(hass, "button", "seal", "reset_input"))
-    assert hass.states.get(time).state == "unknown"
+    assert hass.states.get(day).state == "unknown"
+
+
+async def test_legacy_time_input_is_removed(hass: HomeAssistant) -> None:
+    registry = er.async_get(hass)
+    legacy = registry.async_get_or_create("datetime", DOMAIN, "seal_input_time")
+    await setup_entries(
+        hass,
+        [
+            _sub("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
+            _sub("vehicle", "seal", "Seal U", default_tariff_id="enbw"),
+        ],
+    )
+    assert registry.async_get(legacy.entity_id) is None
 
 
 async def test_input_is_per_vehicle(hass: HomeAssistant, entry) -> None:

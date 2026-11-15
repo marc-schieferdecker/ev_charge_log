@@ -14,7 +14,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -80,7 +80,7 @@ class VehicleInput:
     cost: float | None = None
     tariff_id: str | None = None
     charge_type: str = CHARGE_TYPE_AC
-    timestamp: datetime | None = None  # None: time of booking
+    day: date | None = None  # None: today
 
 
 class EvChargeLogCoordinator:
@@ -252,17 +252,26 @@ class EvChargeLogCoordinator:
     async def async_book_input(self, vehicle_id: str, now: datetime) -> Session:
         """Book the dashboard input as a session, then reset the input.
 
-        Without an entered time the session gets `now`.
+        `now` must be local time. Without an entered date the session gets
+        `now`; with a date it gets that date at the current time of day, so
+        several sessions of one day keep a sensible order.
         """
         current = self.inputs[vehicle_id]
         if current.energy_kwh is None:
             raise ValidationError("energy_kwh is required")
+        timestamp = (
+            now
+            if current.day is None
+            else now.replace(
+                year=current.day.year, month=current.day.month, day=current.day.day
+            )
+        )
         session = await self.async_add_session(
             SessionInput(
                 vehicle_id=vehicle_id,
                 energy_kwh=current.energy_kwh,
                 charge_type=current.charge_type,
-                timestamp=current.timestamp or now,
+                timestamp=timestamp,
                 tariff_id=current.tariff_id,
                 cost=current.cost,
             )
