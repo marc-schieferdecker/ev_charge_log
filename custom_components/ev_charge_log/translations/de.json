@@ -180,6 +180,10 @@
     }
   },
   "exceptions": {
+    "panel_empty": { "message": "Noch keine Fahrzeuge. Lege deine Fahrzeuge und Tarife in den Einstellungen der Integration an." },
+    "panel_add": { "message": "Einstellungen von EV Charge Log öffnen" },
+    "panel_input": { "message": "Ladung eintragen" },
+    "panel_stats": { "message": "Statistik" },
     "reminder_title": { "message": "{vehicle} hat fertig geladen" },
     "reminder_message": {
       "message": "Ladung beendet um {time}. SoC {soc_start} % → {soc_end} %, Tarif: {tariff}.\n\n[Ladung eintragen]({url}) – Energie vom Beleg eingeben und „Ladung buchen“ drücken."

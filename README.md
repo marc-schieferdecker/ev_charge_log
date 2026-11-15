@@ -70,8 +70,8 @@ Assign to a vehicle:
 does not count as a new charge.
 
 When a charge ends, a Home Assistant notification asks you to log the
-session – no automation needed. It links to the vehicle's device page with
-the input entities and disappears once the session is booked.
+session – no automation needed. It links to the **Charging log** page and
+disappears once the session is booked.
 
 In addition, the event `ev_charge_log_charging_finished` is fired
 with `vehicle_id`, `vehicle_name`, `device_id`, `started_at`, `ended_at`,
@@ -100,7 +100,12 @@ you enter by hand always win.
 
 ### Dashboard
 
-Every vehicle gets input entities to book a session:
+EV Charge Log adds a **Charging log** page to the sidebar with one card per
+vehicle: the input fields to log a session and the vehicle's statistics.
+Without vehicles it links to the integration settings.
+
+You can also use the entities on your own dashboards. Every vehicle gets
+input entities to book a session:
 
 | Entity | Purpose |
 | --- | --- |

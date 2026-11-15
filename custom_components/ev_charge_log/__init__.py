@@ -40,6 +40,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_BY_KIND[kind])
     async_register_services(hass)
+    from .panel import async_setup_panel
+
+    await async_setup_panel(hass)
     # Adding, changing or removing a subentry fires the update listener;
     # reload so entities follow the configuration.
     entry.async_on_unload(entry.add_update_listener(_async_reload))
@@ -71,7 +74,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if e.entry_id != entry.entry_id
     ]
     if not others:
+        from .panel import async_remove_panel
+
         async_unregister_services(hass)
+        async_remove_panel(hass)
         async_release_coordinator(hass)
     return True
 

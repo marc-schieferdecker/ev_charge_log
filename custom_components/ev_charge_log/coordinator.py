@@ -17,7 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any
 
-from homeassistant.components import persistent_notification
+from homeassistant.components import frontend, persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import (
@@ -39,6 +39,7 @@ from .const import (
     CHARGE_TYPES,
     DOMAIN,
     EVENT_CHARGING_FINISHED,
+    PANEL_URL_PATH,
     SOURCE_REMINDER,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
@@ -289,13 +290,19 @@ class EvChargeLogCoordinator:
             return "-" if value is None else f"{value:g}"
 
         device_id = self._device_id(vehicle.id)
+        if PANEL_URL_PATH in self.hass.data.get(frontend.DATA_PANELS, {}):
+            url = f"/{PANEL_URL_PATH}"
+        elif device_id:
+            url = f"/config/devices/device/{device_id}"
+        else:
+            url = "/config"
         placeholders = {
             "vehicle": vehicle.name,
             "time": dt_util.as_local(charge.ended_at).strftime("%Y-%m-%d %H:%M"),
             "soc_start": number(charge.soc_start),
             "soc_end": number(charge.soc_end),
             "tariff": tariff.name if tariff else "-",
-            "url": f"/config/devices/device/{device_id}" if device_id else "/config",
+            "url": url,
         }
         title = texts.get(f"{prefix}.reminder_title.message", "{vehicle}")
         message = texts.get(f"{prefix}.reminder_message.message", "{time}")

@@ -180,6 +180,10 @@
     }
   },
   "exceptions": {
+    "panel_empty": { "message": "No vehicles yet. Add your vehicles and tariffs in the integration settings." },
+    "panel_add": { "message": "Open EV Charge Log settings" },
+    "panel_input": { "message": "Log a session" },
+    "panel_stats": { "message": "Statistics" },
     "reminder_title": { "message": "{vehicle} has finished charging" },
     "reminder_message": {
       "message": "Charging ended at {time}. SoC {soc_start} % → {soc_end} %, tariff: {tariff}.\n\n[Log the session]({url}) – enter the energy from the receipt and press \"Book session\"."

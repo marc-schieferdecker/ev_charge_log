@@ -49,6 +49,9 @@ CONF_VALID_FROM: Final = "valid_from"
 
 ZONE_HOME: Final = "zone.home"
 
+# Sidebar panel (stage 4)
+PANEL_URL_PATH: Final = "ev-charge-log"
+
 # Fired when a detected charge ends (not in an excluded zone).
 EVENT_CHARGING_FINISHED: Final = "ev_charge_log_charging_finished"
 
