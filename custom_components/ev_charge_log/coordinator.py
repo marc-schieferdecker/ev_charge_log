@@ -341,10 +341,11 @@ class EvChargeLogCoordinator:
     def _align_charge_type(self, current: VehicleInput) -> None:
         """Switch AC/DC if the selected tariff only has the other price."""
         tariff = self.tariffs.get(current.tariff_id) if current.tariff_id else None
-        if tariff is None or tariff.supports(current.charge_type):
+        today = dt_util.now().date()
+        if tariff is None or tariff.supports(current.charge_type, today):
             return
         for charge_type in CHARGE_TYPES:
-            if tariff.supports(charge_type):
+            if tariff.supports(charge_type, today):
                 current.charge_type = charge_type
                 return
 
@@ -381,11 +382,15 @@ class EvChargeLogCoordinator:
         vehicle = self.vehicles[data.vehicle_id]
         current = self.detection.get(data.vehicle_id, DetectionState())
         defaults = booking_defaults(current, self._soc(vehicle))
+        timestamp = (
+            defaults.timestamp
+            if defaults.timestamp is not None and not timestamp_given
+            else data.timestamp
+        )
         data = replace(
             data,
-            timestamp=defaults.timestamp
-            if defaults.timestamp is not None and not timestamp_given
-            else data.timestamp,
+            # Local time: the price version is chosen by the calendar day.
+            timestamp=dt_util.as_local(timestamp),
             soc_start=data.soc_start
             if data.soc_start is not None
             else defaults.soc_start,

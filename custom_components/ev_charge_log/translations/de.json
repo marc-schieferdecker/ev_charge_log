@@ -87,7 +87,36 @@
         },
         "reconfigure": {
           "title": "Tarif bearbeiten",
-          "description": "Preise in {currency} pro kWh. Änderungen gelten nur für neue Ladungen, gebuchte Ladungen behalten ihre gespeicherten Kosten.",
+          "description": "Preise in {currency} pro kWh („—“ = seit Beginn):\n\n{prices}",
+          "menu_options": {
+            "edit": "Name, Zonen und aktuelle Preise korrigieren",
+            "add_price": "Neue Preise ab Datum",
+            "delete_price": "Preisversion löschen"
+          }
+        },
+        "add_price": {
+          "title": "Neue Preise für {tariff}",
+          "description": "Preise in {currency} pro kWh. Sie gelten für Ladungen ab diesem Datum, gebuchte Ladungen behalten ihre gespeicherten Kosten.",
+          "data": {
+            "valid_from": "Gültig ab",
+            "price_ac": "Preis AC",
+            "price_dc": "Preis DC"
+          },
+          "data_description": {
+            "price_ac": "Leer lassen, wenn der Anbieter ab diesem Datum kein AC-Laden anbietet.",
+            "price_dc": "Leer lassen, wenn der Anbieter ab diesem Datum kein DC-Laden anbietet. Mindestens ein Preis ist nötig."
+          }
+        },
+        "delete_price": {
+          "title": "Preisversion von {tariff} löschen",
+          "description": "Gebuchte Ladungen behalten ihre gespeicherten Kosten. Die Preise seit Beginn lassen sich nicht löschen.",
+          "data": {
+            "valid_from": "Preisversion"
+          }
+        },
+        "edit": {
+          "title": "Tarif bearbeiten",
+          "description": "Preise in {currency} pro kWh, heute gültig. Zum Korrigieren von Tippfehlern; für eine Preisänderung „Neue Preise ab Datum“ wählen. Gebuchte Ladungen behalten ihre gespeicherten Kosten.",
           "data": {
             "name": "Name",
             "price_ac": "Preis AC",
@@ -105,7 +134,8 @@
         "name_required": "Bitte einen Namen eingeben.",
         "name_exists": "Einen Tarif mit diesem Namen gibt es bereits.",
         "price_required": "Bitte mindestens einen AC- oder DC-Preis eingeben.",
-        "zone_taken": "{zone} gehört bereits zum Tarif {tariff}."
+        "zone_taken": "{zone} gehört bereits zum Tarif {tariff}.",
+        "date_exists": "Für dieses Datum gibt es bereits eine Preisversion."
       }
     }
   },

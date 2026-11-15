@@ -471,3 +471,63 @@ async def test_input_is_per_vehicle(hass: HomeAssistant, entry) -> None:
 async def test_cost_input_uses_ha_currency(hass: HomeAssistant, entry) -> None:
     cost = hass.states.get(_entity(hass, "number", "seal", "input_cost"))
     assert cost.attributes["unit_of_measurement"] == hass.config.currency
+
+
+async def test_add_session_uses_price_version_of_its_day(
+    hass: HomeAssistant, entry
+) -> None:
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    tariffs = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "tariffs")
+    enbw = tariffs.subentries["enbw"]
+    hass.config_entries.async_update_subentry(
+        tariffs,
+        enbw,
+        data={
+            **enbw.data,
+            "versions": [
+                {"valid_from": "2027-01-01", "price_ac": 0.62, "price_dc": 0.72}
+            ],
+        },
+    )
+    await hass.async_block_till_done()
+
+    async def book(timestamp: str) -> dict[str, Any]:
+        result = await _call(
+            hass,
+            "add_session",
+            vehicle=_device(hass, "seal"),
+            tariff=_device(hass, "enbw"),
+            energy_kwh=40,
+            timestamp=timestamp,
+        )
+        return result["session"]
+
+    before = await book("2026-12-31T20:00:00+01:00")
+    after = await book("2027-01-01T08:00:00+01:00")
+    assert (before["price_per_kwh"], before["cost"]) == (0.59, 23.60)
+    assert (after["price_per_kwh"], after["cost"]) == (0.62, 24.80)
+
+
+async def test_price_version_uses_local_day(hass: HomeAssistant, entry) -> None:
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    tariffs = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "tariffs")
+    enbw = tariffs.subentries["enbw"]
+    hass.config_entries.async_update_subentry(
+        tariffs,
+        enbw,
+        data={
+            **enbw.data,
+            "versions": [{"valid_from": "2027-01-01", "price_ac": 0.62}],
+        },
+    )
+    await hass.async_block_till_done()
+    result = await _call(
+        hass,
+        "add_session",
+        vehicle=_device(hass, "seal"),
+        tariff=_device(hass, "enbw"),
+        energy_kwh=40,
+        timestamp="2026-12-31T23:30:00+00:00",  # 00:30 on Jan 1 in Berlin
+    )
+    assert result["session"]["price_per_kwh"] == 0.62
+    assert result["session"]["timestamp"] == "2027-01-01T00:30:00+01:00"

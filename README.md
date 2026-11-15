@@ -41,6 +41,11 @@ Two entries are created:
   and/or a DC price per kWh; at least one is required. A tariff only accepts
   sessions of the charge types it has a price for. Optionally assign zones
   (see *Charge reminder*).
+
+  When a provider changes its prices, edit the tariff and choose **New
+  prices from a date**. Sessions are booked with the prices valid on their
+  day, so a session you enter later for an earlier date still gets the old
+  price. Already booked sessions never change.
 - **Vehicles** – add your vehicles, optionally with battery capacity (used
   only for display values), a default tariff and the entities for the
   charge reminder.

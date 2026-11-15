@@ -22,6 +22,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
@@ -34,6 +35,8 @@ from .const import (
     CONF_PRICE_DC,
     CONF_REMINDER_EXCLUDED_ZONES,
     CONF_SOC_ENTITY_ID,
+    CONF_VALID_FROM,
+    CONF_VERSIONS,
     CONF_ZONES,
     DOMAIN,
     KIND_TARIFFS,
@@ -146,7 +149,12 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
         user_input: dict[str, Any] | None,
         schema: vol.Schema,
         to_data: Callable[[dict[str, Any]], dict[str, Any]],
+        suggested: dict[str, Any] | None = None,
     ) -> SubentryFlowResult:
+        """Name checks, type checks, then create or update the subentry.
+
+        `suggested` replaces the default form values (name + stored data).
+        """
         errors: dict[str, str] = {}
         self._placeholders = {}
         current: ConfigSubentry | None = (
@@ -172,11 +180,10 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
                     self._get_entry(), current, title=name, data=data
                 )
 
-        suggested: dict[str, Any] = {}
-        if current is not None:
-            suggested = {CONF_NAME: current.title, **current.data}
         if user_input is not None:
             suggested = user_input
+        elif suggested is None:
+            suggested = {CONF_NAME: current.title, **current.data} if current else {}
 
         return self.async_show_form(
             step_id=step_id,
@@ -257,6 +264,10 @@ class TariffSubentryFlow(_NamedSubentryFlow):
     AC and DC price are optional, at least one is required. Zones (stage 2)
     preselect the tariff when a charge ends there; a zone belongs to at most
     one tariff. Changing prices never touches booked sessions.
+
+    Stage 3: editing opens a menu. "edit" corrects name, zones and the prices
+    valid today; "add_price" adds a price version valid from a date;
+    "delete_price" removes a dated version (the base prices always stay).
     """
 
     _SCHEMA = vol.Schema(
@@ -290,26 +301,201 @@ class TariffSubentryFlow(_NamedSubentryFlow):
 
     @staticmethod
     def _to_data(user_input: dict[str, Any]) -> dict[str, Any]:
-        def price(key: str) -> float | None:
-            value = user_input.get(key)
-            return float(value) if value is not None else None
-
         return {
-            CONF_PRICE_AC: price(CONF_PRICE_AC),
-            CONF_PRICE_DC: price(CONF_PRICE_DC),
+            CONF_PRICE_AC: _price(user_input, CONF_PRICE_AC),
+            CONF_PRICE_DC: _price(user_input, CONF_PRICE_DC),
             CONF_ZONES: list(user_input.get(CONF_ZONES) or []),
+            CONF_VERSIONS: [],
         }
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Add a tariff."""
+        """Add a tariff (base prices only)."""
         return await self._async_handle("user", user_input, self._SCHEMA, self._to_data)
+
+    # --- editing (menu) -------------------------------------------------------
+
+    def _versions(self) -> list[dict[str, Any]]:
+        """Dated versions of the edited tariff, sorted by date."""
+        stored = self._get_reconfigure_subentry().data.get(CONF_VERSIONS) or []
+        return sorted(stored, key=lambda v: v[CONF_VALID_FROM])
+
+    def _today_version_index(self) -> int | None:
+        """Index of the dated version valid today; None means base prices."""
+        today = dt_util.now().date().isoformat()
+        index = None
+        for i, version in enumerate(self._versions()):
+            if version[CONF_VALID_FROM] <= today:
+                index = i
+        return index
+
+    def _prices_text(self) -> str:
+        data = self._get_reconfigure_subentry().data
+        lines = [_version_label("—", data.get(CONF_PRICE_AC), data.get(CONF_PRICE_DC))]
+        lines += [
+            _version_label(
+                v[CONF_VALID_FROM], v.get(CONF_PRICE_AC), v.get(CONF_PRICE_DC)
+            )
+            for v in self._versions()
+        ]
+        return "\n".join(lines)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Change a tariff."""
-        return await self._async_handle(
-            "reconfigure", user_input, self._SCHEMA, self._to_data
+        """Choose what to change."""
+        options = ["edit", "add_price"]
+        if self._versions():
+            options.append("delete_price")
+        return self.async_show_menu(
+            step_id="reconfigure",
+            menu_options=options,
+            description_placeholders={
+                "prices": self._prices_text(),
+                "currency": self.hass.config.currency,
+            },
         )
+
+    async def async_step_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Correct name, zones and the prices valid today."""
+        current = self._get_reconfigure_subentry()
+        index = self._today_version_index()
+        versions = self._versions()
+        prices = versions[index] if index is not None else current.data
+
+        def to_data(values: dict[str, Any]) -> dict[str, Any]:
+            new_prices = {
+                CONF_PRICE_AC: _price(values, CONF_PRICE_AC),
+                CONF_PRICE_DC: _price(values, CONF_PRICE_DC),
+            }
+            data = {
+                **current.data,
+                CONF_ZONES: list(values.get(CONF_ZONES) or []),
+                CONF_VERSIONS: versions,
+            }
+            if index is None:
+                data.update(new_prices)
+            else:
+                data[CONF_VERSIONS] = [
+                    {**v, **new_prices} if i == index else v
+                    for i, v in enumerate(versions)
+                ]
+            return data
+
+        return await self._async_handle(
+            "edit",
+            user_input,
+            self._SCHEMA,
+            to_data,
+            suggested={
+                CONF_NAME: current.title,
+                CONF_PRICE_AC: prices.get(CONF_PRICE_AC),
+                CONF_PRICE_DC: prices.get(CONF_PRICE_DC),
+                CONF_ZONES: current.data.get(CONF_ZONES) or [],
+            },
+        )
+
+    async def async_step_add_price(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Add prices valid from a date on."""
+        current = self._get_reconfigure_subentry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            valid_from = user_input[CONF_VALID_FROM]
+            if _price(user_input, CONF_PRICE_AC) is None and (
+                _price(user_input, CONF_PRICE_DC) is None
+            ):
+                errors["base"] = "price_required"
+            elif any(v[CONF_VALID_FROM] == valid_from for v in self._versions()):
+                errors[CONF_VALID_FROM] = "date_exists"
+            else:
+                version = {
+                    CONF_VALID_FROM: valid_from,
+                    CONF_PRICE_AC: _price(user_input, CONF_PRICE_AC),
+                    CONF_PRICE_DC: _price(user_input, CONF_PRICE_DC),
+                }
+                versions = sorted(
+                    [*self._versions(), version], key=lambda v: v[CONF_VALID_FROM]
+                )
+                return self.async_update_and_abort(
+                    self._get_entry(),
+                    current,
+                    data={**current.data, CONF_VERSIONS: versions},
+                )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_VALID_FROM): selector.DateSelector(),
+                vol.Optional(CONF_PRICE_AC): _PRICE_SELECTOR,
+                vol.Optional(CONF_PRICE_DC): _PRICE_SELECTOR,
+            }
+        )
+        return self.async_show_form(
+            step_id="add_price",
+            data_schema=self.add_suggested_values_to_schema(schema, user_input or {}),
+            errors=errors,
+            description_placeholders={
+                "tariff": current.title,
+                "currency": self.hass.config.currency,
+            },
+        )
+
+    async def async_step_delete_price(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Remove a dated price version."""
+        current = self._get_reconfigure_subentry()
+        versions = self._versions()
+        if user_input is not None:
+            keep = [
+                v for v in versions if v[CONF_VALID_FROM] != user_input[CONF_VALID_FROM]
+            ]
+            return self.async_update_and_abort(
+                self._get_entry(),
+                current,
+                data={**current.data, CONF_VERSIONS: keep},
+            )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_VALID_FROM): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(
+                                value=v[CONF_VALID_FROM],
+                                label=_version_label(
+                                    v[CONF_VALID_FROM],
+                                    v.get(CONF_PRICE_AC),
+                                    v.get(CONF_PRICE_DC),
+                                ),
+                            )
+                            for v in versions
+                        ],
+                        mode=selector.SelectSelectorMode.LIST,
+                    )
+                )
+            }
+        )
+        return self.async_show_form(
+            step_id="delete_price",
+            data_schema=schema,
+            description_placeholders={"tariff": current.title},
+        )
+
+
+def _price(values: dict[str, Any], key: str) -> float | None:
+    value = values.get(key)
+    return float(value) if value is not None else None
+
+
+def _format_price(value: float | None) -> str:
+    return "-" if value is None else f"{value:g}"
+
+
+def _version_label(
+    valid_from: str, price_ac: float | None, price_dc: float | None
+) -> str:
+    return f"{valid_from}: AC {_format_price(price_ac)} / DC {_format_price(price_dc)}"

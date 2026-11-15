@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -228,7 +229,8 @@ async def test_explicit_time_wins_over_detected_end(hass: HomeAssistant, entry) 
         blocking=True,
         return_response=True,
     )
-    assert result["session"]["timestamp"] == "2026-11-01T10:00:00+00:00"
+    booked = datetime.fromisoformat(result["session"]["timestamp"])
+    assert booked == datetime(2026, 11, 1, 10, 0, tzinfo=UTC)
 
 
 async def test_booking_while_charging_suppresses_reminder(

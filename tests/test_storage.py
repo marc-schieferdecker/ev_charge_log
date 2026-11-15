@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import itertools
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 from custom_components.ev_charge_log.models import (
+    PriceVersion,
     SessionInput,
     Tariff,
     ValidationError,
@@ -312,3 +313,61 @@ def test_migrate_1_1_adds_detection() -> None:
 def test_migrate_future_version_is_rejected() -> None:
     with pytest.raises(ValueError):
         migrate(STORAGE_VERSION + 1, 1, {"sessions": []})
+
+
+# --- price versions (stage 3) ---------------------------------------------
+
+ENBW_2027 = Tariff(
+    id="enbw",
+    name="EnBW",
+    price_ac=0.59,
+    price_dc=0.69,
+    versions=(PriceVersion(date(2027, 1, 1), price_ac=0.62, price_dc=0.72),),
+)
+VERSIONED = {**TARIFFS, "enbw": ENBW_2027}
+DEC_31 = datetime(2026, 12, 31, 20, 0, tzinfo=UTC)
+
+
+def test_update_day_recalculates_with_version_of_new_day() -> None:
+    log = _log()
+    log.add(_input(timestamp=DEC_31), VERSIONED)
+    assert log.get("s1").cost == 23.60
+    updated = log.update(
+        "seal_u", VERSIONED, timestamp=datetime(2027, 1, 2, 8, tzinfo=UTC)
+    )
+    assert updated.price_per_kwh == 0.62
+    assert updated.cost == 24.80
+
+
+def test_update_time_on_same_day_keeps_price() -> None:
+    log = _log()
+    log.add(_input(timestamp=DEC_31), TARIFFS)
+    raised = {**TARIFFS, "enbw": Tariff("enbw", "EnBW", price_ac=0.99)}
+    updated = log.update("seal_u", raised, timestamp=DEC_31.replace(hour=8))
+    assert updated.price_per_kwh == 0.59
+
+
+def test_update_day_keeps_manual_cost() -> None:
+    log = _log()
+    log.add(_input(timestamp=DEC_31, cost=19.99), VERSIONED)
+    updated = log.update(
+        "seal_u", VERSIONED, timestamp=datetime(2027, 1, 2, tzinfo=UTC)
+    )
+    assert updated.cost == 19.99
+    assert updated.price_per_kwh == 0.62
+
+
+def test_update_day_of_deleted_tariff_keeps_price() -> None:
+    log = _log()
+    log.add(_input(timestamp=DEC_31), VERSIONED)
+    without = {k: v for k, v in VERSIONED.items() if k != "enbw"}
+    updated = log.update("seal_u", without, timestamp=datetime(2027, 1, 2, tzinfo=UTC))
+    assert updated.price_per_kwh == 0.59
+    assert updated.cost == 23.60
+
+
+def test_update_charge_type_uses_version_of_session_day() -> None:
+    log = _log()
+    log.add(_input(timestamp=datetime(2027, 3, 1, tzinfo=UTC)), VERSIONED)
+    updated = log.update("seal_u", VERSIONED, charge_type="dc")
+    assert updated.price_per_kwh == 0.72

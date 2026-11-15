@@ -43,6 +43,9 @@ CONF_SOC_ENTITY_ID: Final = "soc_entity_id"
 CONF_LOCATION_ENTITY_ID: Final = "location_entity_id"
 CONF_REMINDER_EXCLUDED_ZONES: Final = "reminder_excluded_zones"
 CONF_ZONES: Final = "zones"
+# Stage 3: price versions
+CONF_VERSIONS: Final = "versions"
+CONF_VALID_FROM: Final = "valid_from"
 
 ZONE_HOME: Final = "zone.home"
 

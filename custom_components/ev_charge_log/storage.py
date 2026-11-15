@@ -125,9 +125,11 @@ class SessionLog:
         """Correct a session. Without ID the vehicle's last session.
 
         Price rules:
-        - Same tariff and charge type: the stored price_per_kwh stays.
-        - Tariff or charge type changed: the tariff's current price for the
-          (new) charge type applies.
+        - Same tariff, charge type and day: the stored price_per_kwh stays.
+        - Tariff or charge type changed: the tariff's price for the (new)
+          charge type, in the version valid on the session's day, applies.
+        - Day changed (stage 3): the price of the version valid on the new
+          day applies. If the tariff no longer exists, the stored price stays.
         - A manual cost stays until it is changed or cleared (cost=None).
         """
         old = self._resolve(vehicle_id, session_id)
@@ -149,10 +151,14 @@ class SessionLog:
 
         if tariff_id is not UNSET:
             new = replace(new, tariff_id=tariff_id)
+        day = new.timestamp.date()
         if new.tariff_id != old.tariff_id or new.charge_type != old.charge_type:
             tariff = _lookup_tariff(new.tariff_id, tariffs)
-            price = tariff.price_for(new.charge_type) if tariff else None
+            price = tariff.price_for(new.charge_type, day) if tariff else None
             new = replace(new, price_per_kwh=price)
+        elif day != old.timestamp.date() and new.tariff_id in tariffs:
+            tariff = tariffs[new.tariff_id]
+            new = replace(new, price_per_kwh=tariff.price_for(new.charge_type, day))
 
         if cost is not UNSET and cost is not None:
             new = replace(new, cost=round_money(cost), cost_overridden=True)

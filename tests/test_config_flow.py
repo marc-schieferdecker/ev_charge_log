@@ -66,6 +66,15 @@ async def _start(hass: HomeAssistant, entry, subentry_type: str, subentry_id=Non
     )
 
 
+async def _menu(hass: HomeAssistant, entry, subentry_id: str, choice: str):
+    """Open the edit menu of a subentry and pick an option."""
+    result = await _start(hass, entry, "tariff", subentry_id)
+    assert result["type"] is FlowResultType.MENU
+    return await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"next_step_id": choice}
+    )
+
+
 # --- main entries -------------------------------------------------------------
 
 
@@ -193,7 +202,12 @@ async def test_add_tariff(hass: HomeAssistant, tariffs) -> None:
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     sub = _sub(tariffs, "Ionity")
-    assert dict(sub.data) == {"price_ac": 0.69, "price_dc": 0.79, "zones": []}
+    assert dict(sub.data) == {
+        "price_ac": 0.69,
+        "price_dc": 0.79,
+        "zones": [],
+        "versions": [],
+    }
 
 
 async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) -> None:
@@ -203,7 +217,7 @@ async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) ->
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     data = dict(_sub(tariffs, "Arbeitgeber").data)
-    assert data == {"price_ac": 0.0, "price_dc": None, "zones": []}
+    assert data == {"price_ac": 0.0, "price_dc": None, "zones": [], "versions": []}
 
 
 async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
@@ -216,6 +230,7 @@ async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
         "price_ac": None,
         "price_dc": 0.62,
         "zones": [],
+        "versions": [],
     }
 
 
@@ -246,7 +261,7 @@ async def test_duplicate_tariff_name_is_rejected(hass: HomeAssistant, tariffs) -
 
 
 async def test_reconfigure_tariff(hass: HomeAssistant, tariffs) -> None:
-    result = await _start(hass, tariffs, "tariff", "enbw")
+    result = await _menu(hass, tariffs, "enbw", "edit")
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "EnBW", "price_ac": 0.62}
@@ -257,6 +272,7 @@ async def test_reconfigure_tariff(hass: HomeAssistant, tariffs) -> None:
         "price_ac": 0.62,
         "price_dc": None,
         "zones": [],
+        "versions": [],
     }
 
 
@@ -369,7 +385,7 @@ async def test_reconfigure_keeps_own_zones(hass: HomeAssistant, tariffs) -> None
         result["flow_id"], {"name": "Zuhause", "price_ac": 0, "zones": ["zone.home"]}
     )
     own = _sub(tariffs, "Zuhause")
-    result = await _start(hass, tariffs, "tariff", own.subentry_id)
+    result = await _menu(hass, tariffs, own.subentry_id, "edit")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Zuhause", "price_ac": 0, "zones": ["zone.home"]}
     )
@@ -401,3 +417,86 @@ async def test_rename_vehicle(hass: HomeAssistant, vehicles) -> None:
         result["flow_id"], {"name": "Seal U AWD"}
     )
     assert vehicles.subentries["seal"].title == "Seal U AWD"
+
+
+# --- price versions (stage 3) ---------------------------------------------------
+
+
+async def _add_price(hass: HomeAssistant, tariffs, **values):
+    result = await _menu(hass, tariffs, "enbw", "add_price")
+    assert result["type"] is FlowResultType.FORM
+    return await hass.config_entries.subentries.async_configure(
+        result["flow_id"], values
+    )
+
+
+async def test_edit_menu_lists_prices(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff", "enbw")
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == ["edit", "add_price"]  # nothing to delete
+    assert result["description_placeholders"]["prices"] == "—: AC 0.59 / DC 0.69"
+
+
+async def test_add_price_version(hass: HomeAssistant, tariffs) -> None:
+    result = await _add_price(
+        hass, tariffs, valid_from="2027-01-01", price_ac=0.62, price_dc=0.72
+    )
+    assert result["type"] is FlowResultType.ABORT
+    data = tariffs.subentries["enbw"].data
+    assert (data["price_ac"], data["price_dc"]) == (0.59, 0.69)  # base unchanged
+    assert data["versions"] == [
+        {"valid_from": "2027-01-01", "price_ac": 0.62, "price_dc": 0.72}
+    ]
+    coord = tariffs.runtime_data
+    tariff = coord.tariffs["enbw"]
+    assert len(tariff.versions) == 1  # reloaded with the new version
+
+
+async def test_add_price_version_duplicate_date(hass: HomeAssistant, tariffs) -> None:
+    await _add_price(hass, tariffs, valid_from="2027-01-01", price_ac=0.62)
+    result = await _add_price(hass, tariffs, valid_from="2027-01-01", price_ac=0.7)
+    assert result["errors"] == {"valid_from": "date_exists"}
+
+
+async def test_add_price_version_needs_a_price(hass: HomeAssistant, tariffs) -> None:
+    result = await _add_price(hass, tariffs, valid_from="2027-01-01")
+    assert result["errors"] == {"base": "price_required"}
+
+
+async def test_delete_price_version(hass: HomeAssistant, tariffs) -> None:
+    await _add_price(hass, tariffs, valid_from="2027-01-01", price_ac=0.62)
+    await _add_price(hass, tariffs, valid_from="2027-07-01", price_ac=0.65)
+
+    result = await _start(hass, tariffs, "tariff", "enbw")
+    assert result["menu_options"] == ["edit", "add_price", "delete_price"]
+    result = await _menu(hass, tariffs, "enbw", "delete_price")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"valid_from": "2027-01-01"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    days = [v["valid_from"] for v in tariffs.subentries["enbw"].data["versions"]]
+    assert days == ["2027-07-01"]
+
+
+async def test_edit_corrects_the_version_valid_today(
+    hass: HomeAssistant, tariffs, freezer
+) -> None:
+    freezer.move_to("2027-03-01 12:00:00+00:00")
+    await _add_price(hass, tariffs, valid_from="2027-01-01", price_ac=0.62)
+    await _add_price(hass, tariffs, valid_from="2027-07-01", price_ac=0.65)
+
+    result = await _menu(hass, tariffs, "enbw", "edit")
+    schema = result["data_schema"].schema
+    suggested = {
+        str(k): k.description["suggested_value"]
+        for k in schema
+        if k.description and "suggested_value" in k.description
+    }
+    assert suggested["price_ac"] == 0.62
+
+    await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "EnBW", "price_ac": 0.63}
+    )
+    data = tariffs.subentries["enbw"].data
+    assert data["price_ac"] == 0.59  # base untouched
+    assert [v["price_ac"] for v in data["versions"]] == [0.63, 0.65]

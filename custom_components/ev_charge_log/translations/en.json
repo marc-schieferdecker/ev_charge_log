@@ -87,7 +87,36 @@
         },
         "reconfigure": {
           "title": "Edit tariff",
-          "description": "Prices in {currency} per kWh. Changes only apply to new sessions; booked sessions keep their stored cost.",
+          "description": "Prices in {currency} per kWh (\"—\" = from the beginning):\n\n{prices}",
+          "menu_options": {
+            "edit": "Correct name, zones and current prices",
+            "add_price": "New prices from a date",
+            "delete_price": "Delete a price version"
+          }
+        },
+        "add_price": {
+          "title": "New prices for {tariff}",
+          "description": "Prices in {currency} per kWh. They apply to sessions from this date on; booked sessions keep their stored cost.",
+          "data": {
+            "valid_from": "Valid from",
+            "price_ac": "Price AC",
+            "price_dc": "Price DC"
+          },
+          "data_description": {
+            "price_ac": "Leave empty if the provider offers no AC charging from this date on.",
+            "price_dc": "Leave empty if the provider offers no DC charging from this date on. At least one price is required."
+          }
+        },
+        "delete_price": {
+          "title": "Delete a price version of {tariff}",
+          "description": "Booked sessions keep their stored cost. The prices from the beginning cannot be deleted.",
+          "data": {
+            "valid_from": "Price version"
+          }
+        },
+        "edit": {
+          "title": "Edit tariff",
+          "description": "Prices in {currency} per kWh, valid today. Use this to correct typos; for a price change use \"New prices from a date\". Booked sessions keep their stored cost.",
           "data": {
             "name": "Name",
             "price_ac": "Price AC",
@@ -105,7 +134,8 @@
         "name_required": "Please enter a name.",
         "name_exists": "A tariff with this name already exists.",
         "price_required": "Enter at least an AC or a DC price.",
-        "zone_taken": "{zone} already belongs to the tariff {tariff}."
+        "zone_taken": "{zone} already belongs to the tariff {tariff}.",
+        "date_exists": "There already is a price version for this date."
       }
     }
   },

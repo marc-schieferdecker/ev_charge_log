@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
 from custom_components.ev_charge_log.models import (
+    PriceVersion,
     Session,
     SessionInput,
     Tariff,
@@ -291,3 +292,108 @@ def test_soc_metrics_without_capacity_has_no_loss() -> None:
 def test_soc_metrics_missing_soc() -> None:
     session = build_session("s1", _input(tariff_id="enbw", soc_start=20), ENBW)
     assert soc_metrics(session, 75.0) is None
+
+
+# --- price versions (stage 3) ---------------------------------------------
+
+
+def _versioned() -> Tariff:
+    return Tariff(
+        id="enbw",
+        name="EnBW",
+        price_ac=0.59,
+        price_dc=0.69,
+        versions=(
+            PriceVersion(date(2027, 7, 1), price_ac=0.65, price_dc=0.75),
+            PriceVersion(date(2027, 1, 1), price_ac=0.62, price_dc=0.72),
+        ),
+    )
+
+
+def test_versions_are_sorted() -> None:
+    days = [v.valid_from for v in _versioned().versions]
+    assert days == [date(2027, 1, 1), date(2027, 7, 1)]
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 12, 31), 0.59),  # before the first version: base prices
+        (date(2027, 1, 1), 0.62),  # valid from its date on
+        (date(2027, 6, 30), 0.62),
+        (date(2027, 7, 1), 0.65),
+        (date(2030, 1, 1), 0.65),
+    ],
+)
+def test_price_version_by_day(day: date, expected: float) -> None:
+    assert _versioned().price_for("ac", day) == expected
+
+
+def test_booking_uses_version_of_session_day() -> None:
+    tariff = _versioned()
+    old = build_session(
+        "s1", _input(timestamp=datetime(2026, 12, 31, 20, tzinfo=UTC)), tariff
+    )
+    new = build_session(
+        "s2", _input(timestamp=datetime(2027, 1, 2, 8, tzinfo=UTC)), tariff
+    )
+    assert (old.price_per_kwh, old.cost) == (0.59, 23.60)
+    assert (new.price_per_kwh, new.cost) == (0.62, 24.80)
+
+
+def test_version_without_dc_price_rejects_dc_from_its_date() -> None:
+    tariff = Tariff(
+        id="t",
+        name="T",
+        price_ac=0.5,
+        price_dc=0.6,
+        versions=(PriceVersion(date(2027, 1, 1), price_ac=0.55),),
+    )
+    assert tariff.supports("dc", date(2026, 12, 31))
+    assert not tariff.supports("dc", date(2027, 1, 1))
+    with pytest.raises(ValidationError):
+        calculate_cost(10.0, "dc", tariff, day=date(2027, 2, 1))
+
+
+def test_duplicate_version_dates_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Tariff(
+            id="t",
+            name="T",
+            price_ac=0.5,
+            versions=(
+                PriceVersion(date(2027, 1, 1), price_ac=0.6),
+                PriceVersion(date(2027, 1, 1), price_ac=0.7),
+            ),
+        )
+
+
+def test_version_without_any_price_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        PriceVersion(date(2027, 1, 1))
+
+
+def test_versions_from_dict() -> None:
+    tariff = Tariff.from_dict(
+        {
+            "id": "enbw",
+            "name": "EnBW",
+            "price_ac": 0.59,
+            "versions": [
+                {"valid_from": "2027-01-01", "price_ac": 0.62, "price_dc": None}
+            ],
+        }
+    )
+    assert tariff.versions == (PriceVersion(date(2027, 1, 1), price_ac=0.62),)
+    assert tariff.versions[0].to_dict() == {
+        "valid_from": "2027-01-01",
+        "price_ac": 0.62,
+        "price_dc": None,
+    }
+
+
+def test_tariff_without_versions_from_dict() -> None:
+    """Tariffs stored before stage 3 have no "versions" key."""
+    tariff = Tariff.from_dict({"id": "x", "name": "X", "price_ac": 0.4})
+    assert tariff.versions == ()
+    assert tariff.price_for("ac", date(2030, 1, 1)) == 0.4
