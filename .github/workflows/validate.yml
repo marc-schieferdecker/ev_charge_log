@@ -19,6 +19,5 @@ jobs:
     steps:
       - uses: hacs/action@main
         with:
+          # The brands check accepts the local brand/ folder with icon.png.
           category: integration
-          # Brand assets (icon/logo) are added before the HACS release (stage 4).
-          ignore: brands
