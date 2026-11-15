@@ -1,5 +1,12 @@
 # Local deploy script (machine-specific paths)
 scripts/deploy.*
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
 # Local Claude Code instructions
 CLAUDE.md
