@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import (
@@ -29,6 +30,7 @@ from homeassistant.core import (
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
 
@@ -247,6 +249,10 @@ class EvChargeLogCoordinator:
             self._align_charge_type(current)
         if charge.zone is not None and charge.zone in vehicle.reminder_excluded_zones:
             return
+        self.hass.async_create_task(
+            self._async_notify_charge(vehicle, charge, tariff),
+            f"{DOMAIN} reminder {vehicle.id}",
+        )
         self.hass.bus.async_fire(
             EVENT_CHARGING_FINISHED,
             {
@@ -264,6 +270,45 @@ class EvChargeLogCoordinator:
                 "tariff_name": tariff.name if tariff else None,
             },
         )
+
+    async def _async_notify_charge(
+        self, vehicle: Vehicle, charge: PendingCharge, tariff: Tariff | None
+    ) -> None:
+        """Show the reminder in the HA notifications (no automation needed).
+
+        One notification per vehicle; it is dismissed when the charge is
+        booked. The texts come from the translations ("exceptions" category,
+        the one HA provides for backend messages with placeholders).
+        """
+        texts = await async_get_translations(
+            self.hass, self.hass.config.language, "exceptions", [DOMAIN]
+        )
+        prefix = f"component.{DOMAIN}.exceptions"
+
+        def number(value: float | None) -> str:
+            return "-" if value is None else f"{value:g}"
+
+        device_id = self._device_id(vehicle.id)
+        placeholders = {
+            "vehicle": vehicle.name,
+            "time": dt_util.as_local(charge.ended_at).strftime("%Y-%m-%d %H:%M"),
+            "soc_start": number(charge.soc_start),
+            "soc_end": number(charge.soc_end),
+            "tariff": tariff.name if tariff else "-",
+            "url": f"/config/devices/device/{device_id}" if device_id else "/config",
+        }
+        title = texts.get(f"{prefix}.reminder_title.message", "{vehicle}")
+        message = texts.get(f"{prefix}.reminder_message.message", "{time}")
+        persistent_notification.async_create(
+            self.hass,
+            message.format(**placeholders),
+            title=title.format(**placeholders),
+            notification_id=self._notification_id(vehicle.id),
+        )
+
+    @staticmethod
+    def _notification_id(vehicle_id: str) -> str:
+        return f"{DOMAIN}_charge_{vehicle_id}"
 
     def tariff_for_zone(self, zone: str | None) -> Tariff | None:
         """The tariff a zone is assigned to (a zone belongs to at most one)."""
@@ -400,6 +445,9 @@ class EvChargeLogCoordinator:
         session = self.log.add(data, self.tariffs)
         if defaults.from_detection:
             self.detection[data.vehicle_id] = after_booking(current)
+            persistent_notification.async_dismiss(
+                self.hass, self._notification_id(data.vehicle_id)
+            )
         await self._async_commit()
         return session
 

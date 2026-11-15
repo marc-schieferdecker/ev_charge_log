@@ -180,6 +180,10 @@
     }
   },
   "exceptions": {
+    "reminder_title": { "message": "{vehicle} has finished charging" },
+    "reminder_message": {
+      "message": "Charging ended at {time}. SoC {soc_start} % → {soc_end} %, tariff: {tariff}.\n\n[Log the session]({url}) – enter the energy from the receipt and press \"Book session\"."
+    },
     "not_loaded": { "message": "EV Charge Log is not set up or not loaded." },
     "unknown_vehicle": { "message": "The selected device is not an EV Charge Log vehicle." },
     "unknown_tariff": { "message": "The selected device is not an EV Charge Log tariff." },

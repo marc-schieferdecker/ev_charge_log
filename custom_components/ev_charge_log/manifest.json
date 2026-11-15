@@ -4,7 +4,7 @@
   "categories": ["energy.ev_charging", "vehicles_transport.cars_evs"],
   "codeowners": ["@marc-schieferdecker"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["persistent_notification"],
   "documentation": "https://github.com/marc-schieferdecker/ev_charge_log",
   "integration_type": "service",
   "iot_class": "calculated",

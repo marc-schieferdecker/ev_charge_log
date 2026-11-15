@@ -69,10 +69,14 @@ Assign to a vehicle:
 `unavailable`/`unknown` states are ignored, and a restart of Home Assistant
 does not count as a new charge.
 
-When a charge ends, the event `ev_charge_log_charging_finished` is fired
+When a charge ends, a Home Assistant notification asks you to log the
+session – no automation needed. It links to the vehicle's device page with
+the input entities and disappears once the session is booked.
+
+In addition, the event `ev_charge_log_charging_finished` is fired
 with `vehicle_id`, `vehicle_name`, `device_id`, `started_at`, `ended_at`,
-`soc_start`, `soc_end`, `zone`, `tariff_id` and `tariff_name`. Build your
-reminder on it, for example:
+`soc_start`, `soc_end`, `zone`, `tariff_id` and `tariff_name`. Use it for
+your own reminders, e.g. a push notification to your phone:
 
 ```yaml
 triggers:

@@ -308,3 +308,48 @@ async def test_deleting_vehicle_drops_its_detection_state(
     hass.config_entries.async_remove_subentry(entry, "dolphin")
     await hass.async_block_till_done()
     assert "dolphin" not in hass_storage[STORAGE_KEY]["data"]["detection"]
+
+
+# --- notification without automation (stage 4) ---------------------------------
+
+
+def _notifications(hass: HomeAssistant) -> dict[str, Any]:
+    from homeassistant.components import persistent_notification
+
+    return persistent_notification._async_get_or_create_notifications(hass)
+
+
+async def test_charge_end_creates_notification(hass: HomeAssistant, entry) -> None:
+    await _charge(hass, "31", "80")
+    await hass.async_block_till_done()
+    notes = _notifications(hass)
+    note = notes["ev_charge_log_charge_seal"]
+    assert "Seal U" in note["title"]
+    assert "31 % → 80 %" in note["message"]
+    assert "Zuhause" in note["message"]
+    assert "/config/devices/device/" in note["message"]
+
+
+async def test_booking_dismisses_notification(hass: HomeAssistant, entry) -> None:
+    await _charge(hass, "31", "80")
+    await hass.async_block_till_done()
+    assert "ev_charge_log_charge_seal" in _notifications(hass)
+    await _book_dashboard(hass, "seal", 40)
+    assert "ev_charge_log_charge_seal" not in _notifications(hass)
+
+
+async def test_excluded_zone_creates_no_notification(
+    hass: HomeAssistant, entry
+) -> None:
+    await _states(hass, (D_CHARGING, "on"), (D_CHARGING, "off"))
+    await hass.async_block_till_done()
+    assert "ev_charge_log_charge_dolphin" not in _notifications(hass)
+
+
+async def test_notification_in_german(hass: HomeAssistant, entry) -> None:
+    hass.config.language = "de"
+    await _charge(hass, "31", "80")
+    await hass.async_block_till_done()
+    note = _notifications(hass)["ev_charge_log_charge_seal"]
+    assert note["title"] == "Seal U hat fertig geladen"
+    assert "Ladung eintragen" in note["message"]
