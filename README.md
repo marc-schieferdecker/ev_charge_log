@@ -39,9 +39,53 @@ Two entries are created:
 
 - **Tariffs** – add one tariff per provider or price. Each tariff has an AC
   and/or a DC price per kWh; at least one is required. A tariff only accepts
-  sessions of the charge types it has a price for.
+  sessions of the charge types it has a price for. Optionally assign zones
+  (see *Charge reminder*).
 - **Vehicles** – add your vehicles, optionally with battery capacity (used
-  only for display values) and a default tariff.
+  only for display values), a default tariff and the entities for the
+  charge reminder.
+
+## Charge reminder (optional)
+
+EV Charge Log can watch your vehicle and remind you to log a session. It
+never calculates or books anything by itself – you still enter the energy.
+
+Assign to a vehicle:
+
+- **Charging status** – a `binary_sensor` that is `on` while charging. If
+  your vehicle integration has none, create a template binary sensor.
+- **State of charge** – remembered at the start and the end of a charge and
+  taken over into the next booking (display only).
+- **Location** – a device tracker or person. When a charge ends in a zone
+  that is assigned to a tariff, that tariff is preselected.
+- **Zones without reminder** – e.g. your home zone, if you don't want to be
+  reminded there.
+
+`unavailable`/`unknown` states are ignored, and a restart of Home Assistant
+does not count as a new charge.
+
+When a charge ends, the event `ev_charge_log_charging_finished` is fired
+with `vehicle_id`, `vehicle_name`, `device_id`, `started_at`, `ended_at`,
+`soc_start`, `soc_end`, `zone`, `tariff_id` and `tariff_name`. Build your
+reminder on it, for example:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: ev_charge_log_charging_finished
+actions:
+  - action: notify.mobile_app_my_phone
+    data:
+      title: Log charging session?
+      message: >
+        {{ trigger.event.data.vehicle_name }} charged from
+        {{ trigger.event.data.soc_start }} % to {{ trigger.event.data.soc_end }} %
+        ({{ trigger.event.data.tariff_name or 'tariff unknown' }}).
+```
+
+The next booking of that vehicle takes over the detected values: start and
+end SoC, and the end of charging as time unless you enter a date. Values
+you enter by hand always win.
 
 ## Usage
 

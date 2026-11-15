@@ -154,7 +154,9 @@ def async_register_services(hass: HomeAssistant) -> None:
             location=data.get("location"),
             note=data.get("note"),
         )
-        session = await _run(coord.async_add_session(session_input))
+        session = await _run(
+            coord.async_add_session(session_input, timestamp_given="timestamp" in data)
+        )
         return {"session": _to_response(coord, session)}
 
     async def update_session(call: ServiceCall) -> ServiceResponse:

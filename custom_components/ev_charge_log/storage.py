@@ -26,7 +26,8 @@ from .models import (
 )
 
 STORAGE_VERSION: Final = 1
-STORAGE_MINOR_VERSION: Final = 1
+# 1.1: sessions. 1.2: + charge detection state per vehicle ("detection").
+STORAGE_MINOR_VERSION: Final = 2
 
 
 class SessionNotFoundError(LookupError):
@@ -228,5 +229,6 @@ def migrate(old_major: int, old_minor: int, data: dict[str, Any]) -> dict[str, A
     """
     if old_major > STORAGE_VERSION:
         raise ValueError(f"unsupported storage version {old_major}")
-    # No migrations yet (version 1.1 is the first format).
+    if old_major == 1 and old_minor < 2:
+        data = {**data, "detection": {}}
     return data

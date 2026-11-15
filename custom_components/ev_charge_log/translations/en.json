@@ -22,11 +22,19 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Battery capacity",
-            "default_tariff_id": "Default tariff"
+            "default_tariff_id": "Default tariff",
+            "charging_entity_id": "Charging status",
+            "soc_entity_id": "State of charge (SoC)",
+            "location_entity_id": "Location",
+            "reminder_excluded_zones": "Zones without reminder"
           },
           "data_description": {
             "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
-            "default_tariff_id": "Optional. Preselected when entering a session."
+            "default_tariff_id": "Optional. Preselected when entering a session.",
+            "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
+            "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
+            "location_entity_id": "Optional. Device tracker or person. Selects the tariff of the zone the charge ends in.",
+            "reminder_excluded_zones": "Optional. No reminder after charging in these zones."
           }
         },
         "reconfigure": {
@@ -34,11 +42,19 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Battery capacity",
-            "default_tariff_id": "Default tariff"
+            "default_tariff_id": "Default tariff",
+            "charging_entity_id": "Charging status",
+            "soc_entity_id": "State of charge (SoC)",
+            "location_entity_id": "Location",
+            "reminder_excluded_zones": "Zones without reminder"
           },
           "data_description": {
             "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
-            "default_tariff_id": "Optional. Preselected when entering a session."
+            "default_tariff_id": "Optional. Preselected when entering a session.",
+            "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
+            "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
+            "location_entity_id": "Optional. Device tracker or person. Selects the tariff of the zone the charge ends in.",
+            "reminder_excluded_zones": "Optional. No reminder after charging in these zones."
           }
         }
       },
@@ -60,11 +76,13 @@
           "data": {
             "name": "Name",
             "price_ac": "Price AC",
-            "price_dc": "Price DC"
+            "price_dc": "Price DC",
+            "zones": "Zones"
           },
           "data_description": {
             "price_ac": "Leave empty if the provider offers no AC charging.",
-            "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required."
+            "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required.",
+            "zones": "Optional. When a charge ends in one of these zones, this tariff is preselected. A zone can belong to only one tariff."
           }
         },
         "reconfigure": {
@@ -73,18 +91,21 @@
           "data": {
             "name": "Name",
             "price_ac": "Price AC",
-            "price_dc": "Price DC"
+            "price_dc": "Price DC",
+            "zones": "Zones"
           },
           "data_description": {
             "price_ac": "Leave empty if the provider offers no AC charging.",
-            "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required."
+            "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required.",
+            "zones": "Optional. When a charge ends in one of these zones, this tariff is preselected. A zone can belong to only one tariff."
           }
         }
       },
       "error": {
         "name_required": "Please enter a name.",
         "name_exists": "A tariff with this name already exists.",
-        "price_required": "Enter at least an AC or a DC price."
+        "price_required": "Enter at least an AC or a DC price.",
+        "zone_taken": "{zone} already belongs to the tariff {tariff}."
       }
     }
   },

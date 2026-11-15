@@ -37,6 +37,17 @@ CONF_BATTERY_CAPACITY_KWH: Final = "battery_capacity_kwh"
 CONF_DEFAULT_TARIFF_ID: Final = "default_tariff_id"
 CONF_PRICE_AC: Final = "price_ac"
 CONF_PRICE_DC: Final = "price_dc"
+# Stage 2: charge detection
+CONF_CHARGING_ENTITY_ID: Final = "charging_entity_id"
+CONF_SOC_ENTITY_ID: Final = "soc_entity_id"
+CONF_LOCATION_ENTITY_ID: Final = "location_entity_id"
+CONF_REMINDER_EXCLUDED_ZONES: Final = "reminder_excluded_zones"
+CONF_ZONES: Final = "zones"
+
+ZONE_HOME: Final = "zone.home"
+
+# Fired when a detected charge ends (not in an excluded zone).
+EVENT_CHARGING_FINISHED: Final = "ev_charge_log_charging_finished"
 
 CHARGE_TYPE_AC: Final = "ac"
 CHARGE_TYPE_DC: Final = "dc"

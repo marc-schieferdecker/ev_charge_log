@@ -22,11 +22,19 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Akkukapazität",
-            "default_tariff_id": "Standardtarif"
+            "default_tariff_id": "Standardtarif",
+            "charging_entity_id": "Ladestatus",
+            "soc_entity_id": "Ladezustand (SoC)",
+            "location_entity_id": "Standort",
+            "reminder_excluded_zones": "Zonen ohne Erinnerung"
           },
           "data_description": {
             "battery_capacity_kwh": "Optional. Nur für Anzeigewerte wie den rechnerischen Ladeverlust, nie für Kosten.",
-            "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt."
+            "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt.",
+            "charging_entity_id": "Optional. Binärsensor, der während des Ladens „an“ ist. Aktiviert die Erinnerung nach dem Laden. Hat deine Fahrzeugintegration keinen, lege einen Template-Binärsensor an.",
+            "soc_entity_id": "Optional. SoC in Prozent, wird bei Ladebeginn und Ladeende gemerkt. Nur Anzeige, nie für Kosten.",
+            "location_entity_id": "Optional. Device Tracker oder Person. Bestimmt den Tarif der Zone, in der die Ladung endet.",
+            "reminder_excluded_zones": "Optional. Nach dem Laden in diesen Zonen kommt keine Erinnerung."
           }
         },
         "reconfigure": {
@@ -34,11 +42,19 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Akkukapazität",
-            "default_tariff_id": "Standardtarif"
+            "default_tariff_id": "Standardtarif",
+            "charging_entity_id": "Ladestatus",
+            "soc_entity_id": "Ladezustand (SoC)",
+            "location_entity_id": "Standort",
+            "reminder_excluded_zones": "Zonen ohne Erinnerung"
           },
           "data_description": {
             "battery_capacity_kwh": "Optional. Nur für Anzeigewerte wie den rechnerischen Ladeverlust, nie für Kosten.",
-            "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt."
+            "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt.",
+            "charging_entity_id": "Optional. Binärsensor, der während des Ladens „an“ ist. Aktiviert die Erinnerung nach dem Laden. Hat deine Fahrzeugintegration keinen, lege einen Template-Binärsensor an.",
+            "soc_entity_id": "Optional. SoC in Prozent, wird bei Ladebeginn und Ladeende gemerkt. Nur Anzeige, nie für Kosten.",
+            "location_entity_id": "Optional. Device Tracker oder Person. Bestimmt den Tarif der Zone, in der die Ladung endet.",
+            "reminder_excluded_zones": "Optional. Nach dem Laden in diesen Zonen kommt keine Erinnerung."
           }
         }
       },
@@ -60,11 +76,13 @@
           "data": {
             "name": "Name",
             "price_ac": "Preis AC",
-            "price_dc": "Preis DC"
+            "price_dc": "Preis DC",
+            "zones": "Zonen"
           },
           "data_description": {
             "price_ac": "Leer lassen, wenn der Anbieter kein AC-Laden anbietet.",
-            "price_dc": "Leer lassen, wenn der Anbieter kein DC-Laden anbietet. Mindestens ein Preis ist nötig."
+            "price_dc": "Leer lassen, wenn der Anbieter kein DC-Laden anbietet. Mindestens ein Preis ist nötig.",
+            "zones": "Optional. Endet eine Ladung in einer dieser Zonen, wird dieser Tarif vorbelegt. Eine Zone kann nur zu einem Tarif gehören."
           }
         },
         "reconfigure": {
@@ -73,18 +91,21 @@
           "data": {
             "name": "Name",
             "price_ac": "Preis AC",
-            "price_dc": "Preis DC"
+            "price_dc": "Preis DC",
+            "zones": "Zonen"
           },
           "data_description": {
             "price_ac": "Leer lassen, wenn der Anbieter kein AC-Laden anbietet.",
-            "price_dc": "Leer lassen, wenn der Anbieter kein DC-Laden anbietet. Mindestens ein Preis ist nötig."
+            "price_dc": "Leer lassen, wenn der Anbieter kein DC-Laden anbietet. Mindestens ein Preis ist nötig.",
+            "zones": "Optional. Endet eine Ladung in einer dieser Zonen, wird dieser Tarif vorbelegt. Eine Zone kann nur zu einem Tarif gehören."
           }
         }
       },
       "error": {
         "name_required": "Bitte einen Namen eingeben.",
         "name_exists": "Einen Tarif mit diesem Namen gibt es bereits.",
-        "price_required": "Bitte mindestens einen AC- oder DC-Preis eingeben."
+        "price_required": "Bitte mindestens einen AC- oder DC-Preis eingeben.",
+        "zone_taken": "{zone} gehört bereits zum Tarif {tariff}."
       }
     }
   },

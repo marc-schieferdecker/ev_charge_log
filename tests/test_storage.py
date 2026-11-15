@@ -13,6 +13,7 @@ from custom_components.ev_charge_log.models import (
     ValidationError,
 )
 from custom_components.ev_charge_log.storage import (
+    STORAGE_MINOR_VERSION,
     STORAGE_VERSION,
     SessionLog,
     SessionNotFoundError,
@@ -298,8 +299,14 @@ def test_from_empty_store() -> None:
 
 
 def test_migrate_current_version_is_noop() -> None:
-    data = {"sessions": []}
-    assert migrate(STORAGE_VERSION, 1, data) == data
+    data = {"sessions": [], "detection": {}}
+    assert migrate(STORAGE_VERSION, STORAGE_MINOR_VERSION, data) == data
+
+
+def test_migrate_1_1_adds_detection() -> None:
+    session = {"id": "s1"}
+    data = migrate(1, 1, {"sessions": [session]})
+    assert data == {"sessions": [session], "detection": {}}
 
 
 def test_migrate_future_version_is_rejected() -> None:

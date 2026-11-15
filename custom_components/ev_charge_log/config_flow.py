@@ -25,11 +25,16 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
+    CONF_CHARGING_ENTITY_ID,
     CONF_DEFAULT_TARIFF_ID,
     CONF_KIND,
+    CONF_LOCATION_ENTITY_ID,
     CONF_NAME,
     CONF_PRICE_AC,
     CONF_PRICE_DC,
+    CONF_REMINDER_EXCLUDED_ZONES,
+    CONF_SOC_ENTITY_ID,
+    CONF_ZONES,
     DOMAIN,
     KIND_TARIFFS,
     KINDS,
@@ -52,6 +57,16 @@ _CAPACITY_SELECTOR = selector.NumberSelector(
     )
 )
 _NAME_SELECTOR = selector.TextSelector()
+_CHARGING_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(domain="binary_sensor")
+)
+_SOC_SELECTOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+_LOCATION_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(domain=["device_tracker", "person"])
+)
+_ZONES_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(domain="zone", multiple=True)
+)
 
 
 def _tariff_subentries(hass: HomeAssistant) -> list[ConfigSubentry]:
@@ -109,8 +124,12 @@ class EvChargeLogConfigFlow(ConfigFlow, domain=DOMAIN):
 class _NamedSubentryFlow(ConfigSubentryFlow):
     """Shared logic: unique names within one subentry type."""
 
-    def _validate(self, user_input: dict[str, Any]) -> dict[str, str]:
-        """Type-specific checks; return form errors."""
+    _placeholders: dict[str, str]
+
+    def _validate(
+        self, user_input: dict[str, Any], own_id: str | None
+    ) -> dict[str, str]:
+        """Type-specific checks; return form errors (may set placeholders)."""
         return {}
 
     def _name_taken(self, name: str, own_id: str | None = None) -> bool:
@@ -129,6 +148,7 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
         to_data: Callable[[dict[str, Any]], dict[str, Any]],
     ) -> SubentryFlowResult:
         errors: dict[str, str] = {}
+        self._placeholders = {}
         current: ConfigSubentry | None = (
             self._get_reconfigure_subentry()
             if self.source == SOURCE_RECONFIGURE
@@ -143,7 +163,7 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
             elif self._name_taken(name, own_id):
                 errors[CONF_NAME] = "name_exists"
             else:
-                errors = self._validate(user_input)
+                errors = self._validate(user_input, own_id)
             if not errors:
                 data = to_data(user_input)
                 if current is None:
@@ -162,18 +182,29 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
             step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(schema, suggested),
             errors=errors,
-            description_placeholders={"currency": self.hass.config.currency},
+            description_placeholders={
+                "currency": self.hass.config.currency,
+                **self._placeholders,
+            },
         )
 
 
 class VehicleSubentryFlow(_NamedSubentryFlow):
-    """Add or change a vehicle (stage 1 fields only)."""
+    """Add or change a vehicle.
+
+    The detection entities (stage 2) are optional; without a charging entity
+    there is no detection and no reminder, manual booking always works.
+    """
 
     def _schema(self) -> vol.Schema:
         tariffs = _tariff_subentries(self.hass)
         fields: dict[Any, Any] = {
             vol.Required(CONF_NAME): _NAME_SELECTOR,
             vol.Optional(CONF_BATTERY_CAPACITY_KWH): _CAPACITY_SELECTOR,
+            vol.Optional(CONF_CHARGING_ENTITY_ID): _CHARGING_SELECTOR,
+            vol.Optional(CONF_SOC_ENTITY_ID): _SOC_SELECTOR,
+            vol.Optional(CONF_LOCATION_ENTITY_ID): _LOCATION_SELECTOR,
+            vol.Optional(CONF_REMINDER_EXCLUDED_ZONES): _ZONES_SELECTOR,
         }
         if tariffs:
             fields[vol.Optional(CONF_DEFAULT_TARIFF_ID)] = selector.SelectSelector(
@@ -195,6 +226,12 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
             if capacity is not None
             else None,
             CONF_DEFAULT_TARIFF_ID: user_input.get(CONF_DEFAULT_TARIFF_ID) or None,
+            CONF_CHARGING_ENTITY_ID: user_input.get(CONF_CHARGING_ENTITY_ID) or None,
+            CONF_SOC_ENTITY_ID: user_input.get(CONF_SOC_ENTITY_ID) or None,
+            CONF_LOCATION_ENTITY_ID: user_input.get(CONF_LOCATION_ENTITY_ID) or None,
+            CONF_REMINDER_EXCLUDED_ZONES: list(
+                user_input.get(CONF_REMINDER_EXCLUDED_ZONES) or []
+            ),
         }
 
     async def async_step_user(
@@ -215,10 +252,11 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
 
 
 class TariffSubentryFlow(_NamedSubentryFlow):
-    """Add or change a tariff (stage 1 fields only).
+    """Add or change a tariff.
 
-    AC and DC price are optional, at least one is required. Changing prices
-    never touches booked sessions: their cost is stored.
+    AC and DC price are optional, at least one is required. Zones (stage 2)
+    preselect the tariff when a charge ends there; a zone belongs to at most
+    one tariff. Changing prices never touches booked sessions.
     """
 
     _SCHEMA = vol.Schema(
@@ -226,14 +264,28 @@ class TariffSubentryFlow(_NamedSubentryFlow):
             vol.Required(CONF_NAME): _NAME_SELECTOR,
             vol.Optional(CONF_PRICE_AC): _PRICE_SELECTOR,
             vol.Optional(CONF_PRICE_DC): _PRICE_SELECTOR,
+            vol.Optional(CONF_ZONES): _ZONES_SELECTOR,
         }
     )
 
-    def _validate(self, user_input: dict[str, Any]) -> dict[str, str]:
+    def _validate(
+        self, user_input: dict[str, Any], own_id: str | None
+    ) -> dict[str, str]:
         if user_input.get(CONF_PRICE_AC) is None and (
             user_input.get(CONF_PRICE_DC) is None
         ):
             return {"base": "price_required"}
+        wanted = set(user_input.get(CONF_ZONES) or [])
+        for other in self._get_entry().get_subentries_of_type(SUBENTRY_TYPE_TARIFF):
+            if other.subentry_id == own_id:
+                continue
+            taken = wanted & set(other.data.get(CONF_ZONES) or [])
+            if taken:
+                self._placeholders = {
+                    "tariff": other.title,
+                    "zone": ", ".join(sorted(taken)),
+                }
+                return {CONF_ZONES: "zone_taken"}
         return {}
 
     @staticmethod
@@ -245,6 +297,7 @@ class TariffSubentryFlow(_NamedSubentryFlow):
         return {
             CONF_PRICE_AC: price(CONF_PRICE_AC),
             CONF_PRICE_DC: price(CONF_PRICE_DC),
+            CONF_ZONES: list(user_input.get(CONF_ZONES) or []),
         }
 
     async def async_step_user(

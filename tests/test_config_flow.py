@@ -17,6 +17,13 @@ from custom_components.ev_charge_log.const import DOMAIN
 
 from .conftest import make_subentry, setup_entries
 
+NO_DETECTION = {
+    "charging_entity_id": None,
+    "soc_entity_id": None,
+    "location_entity_id": None,
+    "reminder_excluded_zones": [],
+}
+
 
 @pytest.fixture
 async def entries(hass: HomeAssistant) -> tuple[MockConfigEntry, MockConfigEntry]:
@@ -186,7 +193,7 @@ async def test_add_tariff(hass: HomeAssistant, tariffs) -> None:
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     sub = _sub(tariffs, "Ionity")
-    assert dict(sub.data) == {"price_ac": 0.69, "price_dc": 0.79}
+    assert dict(sub.data) == {"price_ac": 0.69, "price_dc": 0.79, "zones": []}
 
 
 async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) -> None:
@@ -196,7 +203,7 @@ async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) ->
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     data = dict(_sub(tariffs, "Arbeitgeber").data)
-    assert data == {"price_ac": 0.0, "price_dc": None}
+    assert data == {"price_ac": 0.0, "price_dc": None, "zones": []}
 
 
 async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
@@ -205,7 +212,11 @@ async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
         result["flow_id"], {"name": "EWE Go", "price_dc": 0.62}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(_sub(tariffs, "EWE Go").data) == {"price_ac": None, "price_dc": 0.62}
+    assert dict(_sub(tariffs, "EWE Go").data) == {
+        "price_ac": None,
+        "price_dc": 0.62,
+        "zones": [],
+    }
 
 
 async def test_tariff_without_price_is_rejected(hass: HomeAssistant, tariffs) -> None:
@@ -242,7 +253,11 @@ async def test_reconfigure_tariff(hass: HomeAssistant, tariffs) -> None:
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert dict(tariffs.subentries["enbw"].data) == {"price_ac": 0.62, "price_dc": None}
+    assert dict(tariffs.subentries["enbw"].data) == {
+        "price_ac": 0.62,
+        "price_dc": None,
+        "zones": [],
+    }
 
 
 # --- vehicles -----------------------------------------------------------------
@@ -258,6 +273,7 @@ async def test_add_vehicle_with_default_tariff(hass: HomeAssistant, vehicles) ->
     assert dict(_sub(vehicles, "Dolphin").data) == {
         "battery_capacity_kwh": 60.4,
         "default_tariff_id": "enbw",
+        **NO_DETECTION,
     }
 
 
@@ -280,7 +296,84 @@ async def test_add_vehicle_minimal(hass: HomeAssistant, vehicles) -> None:
     assert dict(_sub(vehicles, "Dolphin").data) == {
         "battery_capacity_kwh": None,
         "default_tariff_id": None,
+        **NO_DETECTION,
     }
+
+
+async def test_add_vehicle_with_detection_entities(
+    hass: HomeAssistant, vehicles
+) -> None:
+    result = await _start(hass, vehicles, "vehicle")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            "name": "Dolphin",
+            "charging_entity_id": "binary_sensor.byd_dolphin_laden",
+            "soc_entity_id": "sensor.byd_dolphin_ladezustand",
+            "location_entity_id": "device_tracker.byd_dolphin_standort",
+            "reminder_excluded_zones": ["zone.home"],
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    data = dict(_sub(vehicles, "Dolphin").data)
+    assert data["charging_entity_id"] == "binary_sensor.byd_dolphin_laden"
+    assert data["soc_entity_id"] == "sensor.byd_dolphin_ladezustand"
+    assert data["location_entity_id"] == "device_tracker.byd_dolphin_standort"
+    assert data["reminder_excluded_zones"] == ["zone.home"]
+
+
+async def test_charging_entity_must_be_binary_sensor(
+    hass: HomeAssistant, vehicles
+) -> None:
+    result = await _start(hass, vehicles, "vehicle")
+    with pytest.raises(InvalidData):
+        await hass.config_entries.subentries.async_configure(
+            result["flow_id"],
+            {"name": "Dolphin", "charging_entity_id": "switch.charging"},
+        )
+
+
+# --- tariff zones ---------------------------------------------------------------
+
+
+async def test_tariff_with_several_zones(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {"name": "Zuhause", "price_ac": 0, "zones": ["zone.home", "zone.ferienhaus"]},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert _sub(tariffs, "Zuhause").data["zones"] == ["zone.home", "zone.ferienhaus"]
+
+
+async def test_zone_of_other_tariff_is_rejected(hass: HomeAssistant, tariffs) -> None:
+    hass.config_entries.async_update_subentry(
+        tariffs,
+        tariffs.subentries["enbw"],
+        data={**tariffs.subentries["enbw"].data, "zones": ["zone.work"]},
+    )
+    await hass.async_block_till_done()
+    result = await _start(hass, tariffs, "tariff")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {"name": "Arbeitgeber", "price_ac": 0, "zones": ["zone.work"]},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"zones": "zone_taken"}
+    assert result["description_placeholders"]["tariff"] == "EnBW"
+
+
+async def test_reconfigure_keeps_own_zones(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
+    await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Zuhause", "price_ac": 0, "zones": ["zone.home"]}
+    )
+    own = _sub(tariffs, "Zuhause")
+    result = await _start(hass, tariffs, "tariff", own.subentry_id)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Zuhause", "price_ac": 0, "zones": ["zone.home"]}
+    )
+    assert result["type"] is FlowResultType.ABORT
 
 
 async def test_blank_vehicle_name_is_rejected(hass: HomeAssistant, vehicles) -> None:
