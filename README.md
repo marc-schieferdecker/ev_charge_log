@@ -42,6 +42,11 @@ Two entries are created:
   sessions of the charge types it has a price for. Optionally assign zones
   (see *Charge reminder*).
 
+  A tariff can have a **monthly fee**: choose the vehicle that carries it
+  and the first (and optionally last) month. It is booked automatically for
+  every started month and included in the vehicle's total cost and average
+  price; a separate sensor shows the fees.
+
   When a provider changes its prices, edit the tariff and choose **New
   prices from a date**. Sessions are booked with the prices valid on their
   day, so a session you enter later for an earlier date still gets the old

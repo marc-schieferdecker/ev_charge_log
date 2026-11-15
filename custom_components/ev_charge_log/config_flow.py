@@ -7,7 +7,7 @@ title is the display name, the subentry ID the stable ID.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import voluptuous as vol  # resolves to probatio on HA >= 2026.9
@@ -28,8 +28,12 @@ from .const import (
     CONF_BATTERY_CAPACITY_KWH,
     CONF_CHARGING_ENTITY_ID,
     CONF_DEFAULT_TARIFF_ID,
+    CONF_FEE_END,
+    CONF_FEE_START,
+    CONF_FEE_VEHICLE_ID,
     CONF_KIND,
     CONF_LOCATION_ENTITY_ID,
+    CONF_MONTHLY_FEE,
     CONF_NAME,
     CONF_PRICE_AC,
     CONF_PRICE_DC,
@@ -40,6 +44,7 @@ from .const import (
     CONF_ZONES,
     DOMAIN,
     KIND_TARIFFS,
+    KIND_VEHICLES,
     KINDS,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
@@ -76,6 +81,12 @@ def _tariff_subentries(hass: HomeAssistant) -> list[ConfigSubentry]:
     """Tariffs of the tariffs entry (empty if it does not exist yet)."""
     entry = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, KIND_TARIFFS)
     return entry.get_subentries_of_type(SUBENTRY_TYPE_TARIFF) if entry else []
+
+
+def _vehicle_subentries(hass: HomeAssistant) -> list[ConfigSubentry]:
+    """Vehicles of the vehicles entry (empty if it does not exist yet)."""
+    entry = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, KIND_VEHICLES)
+    return entry.get_subentries_of_type(SUBENTRY_TYPE_VEHICLE) if entry else []
 
 
 class EvChargeLogConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -270,14 +281,28 @@ class TariffSubentryFlow(_NamedSubentryFlow):
     "delete_price" removes a dated version (the base prices always stay).
     """
 
-    _SCHEMA = vol.Schema(
-        {
+    def _schema(self) -> vol.Schema:
+        fields: dict[Any, Any] = {
             vol.Required(CONF_NAME): _NAME_SELECTOR,
             vol.Optional(CONF_PRICE_AC): _PRICE_SELECTOR,
             vol.Optional(CONF_PRICE_DC): _PRICE_SELECTOR,
             vol.Optional(CONF_ZONES): _ZONES_SELECTOR,
+            vol.Optional(CONF_MONTHLY_FEE): _PRICE_SELECTOR,
         }
-    )
+        vehicles = _vehicle_subentries(self.hass)
+        if vehicles:
+            fields[vol.Optional(CONF_FEE_VEHICLE_ID)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value=v.subentry_id, label=v.title)
+                        for v in vehicles
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+        fields[vol.Optional(CONF_FEE_START)] = selector.DateSelector()
+        fields[vol.Optional(CONF_FEE_END)] = selector.DateSelector()
+        return vol.Schema(fields)
 
     def _validate(
         self, user_input: dict[str, Any], own_id: str | None
@@ -286,6 +311,13 @@ class TariffSubentryFlow(_NamedSubentryFlow):
             user_input.get(CONF_PRICE_DC) is None
         ):
             return {"base": "price_required"}
+        if user_input.get(CONF_MONTHLY_FEE) is not None and not (
+            user_input.get(CONF_FEE_VEHICLE_ID) and user_input.get(CONF_FEE_START)
+        ):
+            return {"base": "fee_incomplete"}
+        start, end = user_input.get(CONF_FEE_START), user_input.get(CONF_FEE_END)
+        if start and end and end < start:
+            return {CONF_FEE_END: "fee_end_before_start"}
         wanted = set(user_input.get(CONF_ZONES) or [])
         for other in self._get_entry().get_subentries_of_type(SUBENTRY_TYPE_TARIFF):
             if other.subentry_id == own_id:
@@ -300,19 +332,32 @@ class TariffSubentryFlow(_NamedSubentryFlow):
         return {}
 
     @staticmethod
-    def _to_data(user_input: dict[str, Any]) -> dict[str, Any]:
+    def _fee_data(user_input: dict[str, Any]) -> dict[str, Any]:
+        """Tariff-level fee settings (not versioned)."""
+        return {
+            CONF_FEE_VEHICLE_ID: user_input.get(CONF_FEE_VEHICLE_ID) or None,
+            CONF_FEE_START: user_input.get(CONF_FEE_START) or None,
+            CONF_FEE_END: user_input.get(CONF_FEE_END) or None,
+        }
+
+    @classmethod
+    def _to_data(cls, user_input: dict[str, Any]) -> dict[str, Any]:
         return {
             CONF_PRICE_AC: _price(user_input, CONF_PRICE_AC),
             CONF_PRICE_DC: _price(user_input, CONF_PRICE_DC),
+            CONF_MONTHLY_FEE: _price(user_input, CONF_MONTHLY_FEE),
             CONF_ZONES: list(user_input.get(CONF_ZONES) or []),
             CONF_VERSIONS: [],
+            **cls._fee_data(user_input),
         }
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
         """Add a tariff (base prices only)."""
-        return await self._async_handle("user", user_input, self._SCHEMA, self._to_data)
+        return await self._async_handle(
+            "user", user_input, self._schema(), self._to_data
+        )
 
     # --- editing (menu) -------------------------------------------------------
 
@@ -332,14 +377,18 @@ class TariffSubentryFlow(_NamedSubentryFlow):
 
     def _prices_text(self) -> str:
         data = self._get_reconfigure_subentry().data
-        lines = [_version_label("—", data.get(CONF_PRICE_AC), data.get(CONF_PRICE_DC))]
-        lines += [
-            _version_label(
-                v[CONF_VALID_FROM], v.get(CONF_PRICE_AC), v.get(CONF_PRICE_DC)
-            )
-            for v in self._versions()
-        ]
+        lines = [_version_label("—", data)]
+        lines += [_version_label(v[CONF_VALID_FROM], v) for v in self._versions()]
         return "\n".join(lines)
+
+    def _fee_until(self, index: int | None) -> float | None:
+        """Monthly fee in effect for the base prices or a dated version."""
+        fee = self._get_reconfigure_subentry().data.get(CONF_MONTHLY_FEE)
+        if index is not None:
+            for version in self._versions()[: index + 1]:
+                if version.get(CONF_MONTHLY_FEE) is not None:
+                    fee = version[CONF_MONTHLY_FEE]
+        return fee
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -360,7 +409,7 @@ class TariffSubentryFlow(_NamedSubentryFlow):
     async def async_step_edit(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Correct name, zones and the prices valid today."""
+        """Correct name, zones, fee settings and the prices valid today."""
         current = self._get_reconfigure_subentry()
         index = self._today_version_index()
         versions = self._versions()
@@ -370,11 +419,13 @@ class TariffSubentryFlow(_NamedSubentryFlow):
             new_prices = {
                 CONF_PRICE_AC: _price(values, CONF_PRICE_AC),
                 CONF_PRICE_DC: _price(values, CONF_PRICE_DC),
+                CONF_MONTHLY_FEE: _price(values, CONF_MONTHLY_FEE),
             }
             data = {
                 **current.data,
                 CONF_ZONES: list(values.get(CONF_ZONES) or []),
                 CONF_VERSIONS: versions,
+                **self._fee_data(values),
             }
             if index is None:
                 data.update(new_prices)
@@ -388,13 +439,17 @@ class TariffSubentryFlow(_NamedSubentryFlow):
         return await self._async_handle(
             "edit",
             user_input,
-            self._SCHEMA,
+            self._schema(),
             to_data,
             suggested={
                 CONF_NAME: current.title,
                 CONF_PRICE_AC: prices.get(CONF_PRICE_AC),
                 CONF_PRICE_DC: prices.get(CONF_PRICE_DC),
+                CONF_MONTHLY_FEE: self._fee_until(index),
                 CONF_ZONES: current.data.get(CONF_ZONES) or [],
+                CONF_FEE_VEHICLE_ID: current.data.get(CONF_FEE_VEHICLE_ID),
+                CONF_FEE_START: current.data.get(CONF_FEE_START),
+                CONF_FEE_END: current.data.get(CONF_FEE_END),
             },
         )
 
@@ -417,6 +472,7 @@ class TariffSubentryFlow(_NamedSubentryFlow):
                     CONF_VALID_FROM: valid_from,
                     CONF_PRICE_AC: _price(user_input, CONF_PRICE_AC),
                     CONF_PRICE_DC: _price(user_input, CONF_PRICE_DC),
+                    CONF_MONTHLY_FEE: _price(user_input, CONF_MONTHLY_FEE),
                 }
                 versions = sorted(
                     [*self._versions(), version], key=lambda v: v[CONF_VALID_FROM]
@@ -432,6 +488,7 @@ class TariffSubentryFlow(_NamedSubentryFlow):
                 vol.Required(CONF_VALID_FROM): selector.DateSelector(),
                 vol.Optional(CONF_PRICE_AC): _PRICE_SELECTOR,
                 vol.Optional(CONF_PRICE_DC): _PRICE_SELECTOR,
+                vol.Optional(CONF_MONTHLY_FEE): _PRICE_SELECTOR,
             }
         )
         return self.async_show_form(
@@ -466,11 +523,7 @@ class TariffSubentryFlow(_NamedSubentryFlow):
                         options=[
                             selector.SelectOptionDict(
                                 value=v[CONF_VALID_FROM],
-                                label=_version_label(
-                                    v[CONF_VALID_FROM],
-                                    v.get(CONF_PRICE_AC),
-                                    v.get(CONF_PRICE_DC),
-                                ),
+                                label=_version_label(v[CONF_VALID_FROM], v),
                             )
                             for v in versions
                         ],
@@ -495,7 +548,12 @@ def _format_price(value: float | None) -> str:
     return "-" if value is None else f"{value:g}"
 
 
-def _version_label(
-    valid_from: str, price_ac: float | None, price_dc: float | None
-) -> str:
-    return f"{valid_from}: AC {_format_price(price_ac)} / DC {_format_price(price_dc)}"
+def _version_label(valid_from: str, prices: Mapping[str, Any]) -> str:
+    """E.g. "2027-01-01: AC 0.62 / DC 0.72 + 12.99" (+ = monthly fee)."""
+    label = (
+        f"{valid_from}: AC {_format_price(prices.get(CONF_PRICE_AC))}"
+        f" / DC {_format_price(prices.get(CONF_PRICE_DC))}"
+    )
+    if prices.get(CONF_MONTHLY_FEE) is not None:
+        label += f" + {_format_price(prices[CONF_MONTHLY_FEE])}"
+    return label

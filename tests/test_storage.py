@@ -300,14 +300,14 @@ def test_from_empty_store() -> None:
 
 
 def test_migrate_current_version_is_noop() -> None:
-    data = {"sessions": [], "detection": {}}
+    data = {"sessions": [], "detection": {}, "fees": []}
     assert migrate(STORAGE_VERSION, STORAGE_MINOR_VERSION, data) == data
 
 
 def test_migrate_1_1_adds_detection() -> None:
     session = {"id": "s1"}
     data = migrate(1, 1, {"sessions": [session]})
-    assert data == {"sessions": [session], "detection": {}}
+    assert data == {"sessions": [session], "detection": {}, "fees": []}
 
 
 def test_migrate_future_version_is_rejected() -> None:
@@ -371,3 +371,74 @@ def test_update_charge_type_uses_version_of_session_day() -> None:
     log.add(_input(timestamp=datetime(2027, 3, 1, tzinfo=UTC)), VERSIONED)
     updated = log.update("seal_u", VERSIONED, charge_type="dc")
     assert updated.price_per_kwh == 0.72
+
+
+# --- monthly fees (stage 4) -----------------------------------------------
+
+FEE_TARIFF = Tariff(
+    id="enbw",
+    name="EnBW",
+    price_ac=0.59,
+    monthly_fee=11.99,
+    fee_vehicle_id="seal_u",
+    fee_start=date(2026, 10, 1),
+)
+
+
+def test_book_due_fees_once() -> None:
+    log = _log()
+    booked = log.book_due_fees([FEE_TARIFF], date(2026, 11, 20))
+    assert [(f.month, f.amount, f.vehicle_id) for f in booked] == [
+        ("2026-10", 11.99, "seal_u"),
+        ("2026-11", 11.99, "seal_u"),
+    ]
+    assert log.book_due_fees([FEE_TARIFF], date(2026, 11, 30)) == []
+    assert len(log.book_due_fees([FEE_TARIFF], date(2026, 12, 1))) == 1
+
+
+def test_booked_fees_do_not_change() -> None:
+    log = _log()
+    log.book_due_fees([FEE_TARIFF], date(2026, 10, 5))
+    raised = Tariff(
+        id="enbw",
+        name="EnBW",
+        price_ac=0.59,
+        monthly_fee=15.0,
+        fee_vehicle_id="dolphin",
+        fee_start=date(2026, 10, 1),
+    )
+    log.book_due_fees([raised], date(2026, 11, 5))
+    assert [(f.month, f.amount, f.vehicle_id) for f in log.fees()] == [
+        ("2026-10", 11.99, "seal_u"),
+        ("2026-11", 15.0, "dolphin"),
+    ]
+
+
+def test_fees_count_in_vehicle_and_tariff_summary() -> None:
+    log = _log()
+    log.add(_input(), TARIFFS)
+    log.book_due_fees([FEE_TARIFF], date(2026, 10, 5))
+    vehicle = log.summary_for_vehicle("seal_u")
+    assert vehicle.total_cost == 35.59
+    assert vehicle.fee_total == 11.99
+    assert vehicle.session_count == 1
+    assert log.summary_for_tariff("enbw").total_cost == 35.59
+    assert log.summary_for_vehicle("dolphin").fee_total == 0
+
+
+def test_fees_removed_with_vehicle() -> None:
+    log = _log()
+    log.book_due_fees([FEE_TARIFF], date(2026, 11, 5))
+    assert log.remove_other_vehicles(["dolphin"]) == 2
+    assert log.fees() == []
+
+
+def test_fees_roundtrip() -> None:
+    log = _log()
+    log.book_due_fees([FEE_TARIFF], date(2026, 11, 5))
+    assert SessionLog.from_data(log.to_data()).fees() == log.fees()
+
+
+def test_migrate_1_2_adds_fees() -> None:
+    data = migrate(1, 2, {"sessions": [], "detection": {}})
+    assert data["fees"] == []

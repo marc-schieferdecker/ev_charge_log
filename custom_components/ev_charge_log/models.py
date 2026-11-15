@@ -79,10 +79,13 @@ class PriceVersion:
     valid_from: date
     price_ac: float | None = None
     price_dc: float | None = None
+    # Stage 4: None means "the previous monthly fee still applies".
+    monthly_fee: float | None = None
 
     def __post_init__(self) -> None:
         """Validate the prices."""
         _validate_prices(self.price_ac, self.price_dc)
+        _require_non_negative("monthly_fee", self.monthly_fee)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for subentry data."""
@@ -90,6 +93,7 @@ class PriceVersion:
             "valid_from": self.valid_from.isoformat(),
             "price_ac": self.price_ac,
             "price_dc": self.price_dc,
+            "monthly_fee": self.monthly_fee,
         }
 
     @classmethod
@@ -99,7 +103,23 @@ class PriceVersion:
             valid_from=date.fromisoformat(data["valid_from"]),
             price_ac=_optional_float(data.get("price_ac")),
             price_dc=_optional_float(data.get("price_dc")),
+            monthly_fee=_optional_float(data.get("monthly_fee")),
         )
+
+
+def month_of(day: date) -> str:
+    """Month key "YYYY-MM"."""
+    return f"{day.year:04d}-{day.month:02d}"
+
+
+def _months(first: date, last: date) -> list[date]:
+    """First days of all months from `first` to `last` (inclusive)."""
+    months = []
+    year, month = first.year, first.month
+    while (year, month) <= (last.year, last.month):
+        months.append(date(year, month, 1))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return months
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +134,10 @@ class Tariff:
     Per version, AC and DC prices are each optional, but at least one is
     required. A tariff only accepts sessions of the charge types it has a
     price for on that day; there is no fallback from one price to the other.
+
+    Monthly fee (stage 4): `monthly_fee` is charged to `fee_vehicle_id` for
+    every month from `fee_start` to `fee_end` (both inclusive, open end if
+    None). A version may change the fee from its date on.
     """
 
     id: str
@@ -123,11 +147,16 @@ class Tariff:
     zones: tuple[str, ...] = ()
     versions: tuple[PriceVersion, ...] = ()
     monthly_fee: float | None = None
+    fee_vehicle_id: str | None = None
+    fee_start: date | None = None
+    fee_end: date | None = None
 
     def __post_init__(self) -> None:
         """Validate the tariff and sort the versions by date."""
         _validate_prices(self.price_ac, self.price_dc)
         _require_non_negative("monthly_fee", self.monthly_fee)
+        if self.fee_start and self.fee_end and self.fee_end < self.fee_start:
+            raise ValidationError("fee_end is before fee_start")
         days = [v.valid_from for v in self.versions]
         if len(days) != len(set(days)):
             raise ValidationError("two price versions with the same date")
@@ -162,6 +191,33 @@ class Tariff:
         price_ac, price_dc = self.prices_on(day)
         return price_dc if charge_type == CHARGE_TYPE_DC else price_ac
 
+    def fee_on(self, day: date) -> float | None:
+        """Monthly fee valid on a day (versions without a fee keep the last)."""
+        fee = self.monthly_fee
+        for version in self.versions:
+            if version.valid_from > day:
+                break
+            if version.monthly_fee is not None:
+                fee = version.monthly_fee
+        return fee
+
+    def due_fees(self, today: date, booked: set[str]) -> list[tuple[str, float]]:
+        """(month, amount) of fee months up to today that are not booked yet.
+
+        A month is due from its first day on; the amount is the fee valid on
+        that day. Months without a fee (None) are skipped.
+        """
+        if self.fee_vehicle_id is None or self.fee_start is None:
+            return []
+        last = min(today, self.fee_end) if self.fee_end else today
+        due = []
+        for first in _months(self.fee_start, last):
+            key = month_of(first)
+            fee = self.fee_on(first)
+            if key not in booked and fee is not None:
+                due.append((key, round_money(fee)))
+        return due
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Tariff:
         """Create a tariff from stored data."""
@@ -175,6 +231,47 @@ class Tariff:
                 PriceVersion.from_dict(v) for v in data.get("versions") or ()
             ),
             monthly_fee=_optional_float(data.get("monthly_fee")),
+            fee_vehicle_id=data.get("fee_vehicle_id"),
+            fee_start=_optional_date(data.get("fee_start")),
+            fee_end=_optional_date(data.get("fee_end")),
+        )
+
+
+def _optional_date(value: Any) -> date | None:
+    return date.fromisoformat(value) if value else None
+
+
+@dataclass(frozen=True, slots=True)
+class Fee:
+    """A booked monthly fee. Immutable snapshot like a session."""
+
+    tariff_id: str
+    vehicle_id: str
+    month: str  # "YYYY-MM"
+    amount: float
+
+    def __post_init__(self) -> None:
+        """Normalize and validate."""
+        object.__setattr__(self, "amount", float(self.amount))
+        _require_non_negative("amount", self.amount)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for storage."""
+        return {
+            "tariff_id": self.tariff_id,
+            "vehicle_id": self.vehicle_id,
+            "month": self.month,
+            "amount": self.amount,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Fee:
+        """Load from storage."""
+        return cls(
+            tariff_id=data["tariff_id"],
+            vehicle_id=data["vehicle_id"],
+            month=data["month"],
+            amount=data["amount"],
         )
 
 
@@ -300,22 +397,26 @@ def calculate_cost(
 
 @dataclass(frozen=True, slots=True)
 class Summary:
-    """Aggregated values over a set of sessions."""
+    """Aggregated values over sessions and monthly fees.
+
+    `total_cost` includes the fees; `fee_total` shows them separately.
+    """
 
     total_cost: float
     total_energy_kwh: float
     session_count: int
+    fee_total: float = 0.0
 
     @property
     def average_price_per_kwh(self) -> float | None:
-        """Total cost / total energy over all sessions, including free ones."""
+        """Total cost (incl. fees) / total energy, including free sessions."""
         if self.total_energy_kwh == 0:
             return None
         return round(self.total_cost / self.total_energy_kwh, 4)
 
 
-def summarize(sessions: Iterable[Session]) -> Summary:
-    """Sum up cost, energy and count."""
+def summarize(sessions: Iterable[Session], fees: Iterable[Fee] = ()) -> Summary:
+    """Sum up cost, energy and count; fees add to the cost only."""
     cost = Decimal(0)
     energy = Decimal(0)
     count = 0
@@ -323,7 +424,8 @@ def summarize(sessions: Iterable[Session]) -> Summary:
         cost += Decimal(str(session.cost))
         energy += Decimal(str(session.energy_kwh))
         count += 1
-    return Summary(float(cost), float(energy), count)
+    fee_total = sum((Decimal(str(fee.amount)) for fee in fees), Decimal(0))
+    return Summary(float(cost + fee_total), float(energy), count, float(fee_total))
 
 
 @dataclass(frozen=True, slots=True)

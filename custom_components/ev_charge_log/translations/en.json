@@ -77,17 +77,25 @@
             "name": "Name",
             "price_ac": "Price AC",
             "price_dc": "Price DC",
-            "zones": "Zones"
+            "zones": "Zones",
+            "monthly_fee": "Monthly fee",
+            "fee_vehicle_id": "Monthly fee charged to",
+            "fee_start": "Monthly fee from",
+            "fee_end": "Monthly fee until"
           },
           "data_description": {
             "price_ac": "Leave empty if the provider offers no AC charging.",
             "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required.",
-            "zones": "Optional. When a charge ends in one of these zones, this tariff is preselected. A zone can belong to only one tariff."
+            "zones": "Optional. When a charge ends in one of these zones, this tariff is preselected. A zone can belong to only one tariff.",
+            "monthly_fee": "Optional. Booked automatically for every started month and added to the vehicle's total cost and average price.",
+            "fee_vehicle_id": "Required with a monthly fee: the vehicle that carries the fee.",
+            "fee_start": "Required with a monthly fee: first month (any day of the month).",
+            "fee_end": "Optional, e.g. after cancelling: last month that is charged."
           }
         },
         "reconfigure": {
           "title": "Edit tariff",
-          "description": "Prices in {currency} per kWh (\"—\" = from the beginning):\n\n{prices}",
+          "description": "Prices in {currency} per kWh (\"—\" = from the beginning, \"+\" = monthly fee):\n\n{prices}",
           "menu_options": {
             "edit": "Correct name, zones and current prices",
             "add_price": "New prices from a date",
@@ -100,9 +108,11 @@
           "data": {
             "valid_from": "Valid from",
             "price_ac": "Price AC",
-            "price_dc": "Price DC"
+            "price_dc": "Price DC",
+            "monthly_fee": "Monthly fee"
           },
           "data_description": {
+            "monthly_fee": "Optional. Applies to months starting on or after this date. Empty: the previous monthly fee stays.",
             "price_ac": "Leave empty if the provider offers no AC charging from this date on.",
             "price_dc": "Leave empty if the provider offers no DC charging from this date on. At least one price is required."
           }
@@ -121,12 +131,20 @@
             "name": "Name",
             "price_ac": "Price AC",
             "price_dc": "Price DC",
-            "zones": "Zones"
+            "zones": "Zones",
+            "monthly_fee": "Monthly fee",
+            "fee_vehicle_id": "Monthly fee charged to",
+            "fee_start": "Monthly fee from",
+            "fee_end": "Monthly fee until"
           },
           "data_description": {
             "price_ac": "Leave empty if the provider offers no AC charging.",
             "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required.",
-            "zones": "Optional. When a charge ends in one of these zones, this tariff is preselected. A zone can belong to only one tariff."
+            "zones": "Optional. When a charge ends in one of these zones, this tariff is preselected. A zone can belong to only one tariff.",
+            "monthly_fee": "Optional. Booked automatically for every started month and added to the vehicle's total cost and average price.",
+            "fee_vehicle_id": "Required with a monthly fee: the vehicle that carries the fee.",
+            "fee_start": "Required with a monthly fee: first month (any day of the month).",
+            "fee_end": "Optional, e.g. after cancelling: last month that is charged."
           }
         }
       },
@@ -135,7 +153,9 @@
         "name_exists": "A tariff with this name already exists.",
         "price_required": "Enter at least an AC or a DC price.",
         "zone_taken": "{zone} already belongs to the tariff {tariff}.",
-        "date_exists": "There already is a price version for this date."
+        "date_exists": "There already is a price version for this date.",
+        "fee_incomplete": "A monthly fee needs the vehicle that carries it and a start month.",
+        "fee_end_before_start": "The last month is before the first month."
       }
     }
   },
@@ -143,6 +163,7 @@
     "sensor": {
       "total_cost": { "name": "Total cost" },
       "total_energy": { "name": "Total energy" },
+      "fee_total": { "name": "Monthly fees" },
       "average_price": { "name": "Average price" },
       "session_count": { "name": "Sessions" },
       "last_session_cost": { "name": "Last session cost" },

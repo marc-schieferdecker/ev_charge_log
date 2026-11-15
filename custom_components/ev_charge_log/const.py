@@ -46,6 +46,11 @@ CONF_ZONES: Final = "zones"
 # Stage 3: price versions
 CONF_VERSIONS: Final = "versions"
 CONF_VALID_FROM: Final = "valid_from"
+# Stage 4: monthly fee
+CONF_MONTHLY_FEE: Final = "monthly_fee"
+CONF_FEE_VEHICLE_ID: Final = "fee_vehicle_id"
+CONF_FEE_START: Final = "fee_start"
+CONF_FEE_END: Final = "fee_end"
 
 ZONE_HOME: Final = "zone.home"
 

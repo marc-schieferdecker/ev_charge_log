@@ -113,6 +113,15 @@ VEHICLE_SENSORS: tuple[EvChargeLogSensorDescription, ...] = (
         value_fn=lambda c, v: c.log.summary_for_vehicle(v).total_energy_kwh,
     ),
     EvChargeLogSensorDescription(
+        key="fee_total",
+        translation_key="fee_total",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=_CURRENCY,
+        suggested_display_precision=2,
+        value_fn=lambda c, v: c.log.summary_for_vehicle(v).fee_total,
+    ),
+    EvChargeLogSensorDescription(
         key="average_price",
         translation_key="average_price",
         native_unit_of_measurement=_CURRENCY_PER_KWH,

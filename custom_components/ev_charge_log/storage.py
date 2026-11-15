@@ -10,11 +10,12 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Final
 
 from .models import (
+    Fee,
     Session,
     SessionInput,
     Summary,
@@ -27,7 +28,8 @@ from .models import (
 
 STORAGE_VERSION: Final = 1
 # 1.1: sessions. 1.2: + charge detection state per vehicle ("detection").
-STORAGE_MINOR_VERSION: Final = 2
+# 1.3: + booked monthly fees ("fees").
+STORAGE_MINOR_VERSION: Final = 3
 
 
 class SessionNotFoundError(LookupError):
@@ -53,10 +55,13 @@ class SessionLog:
         self,
         sessions: Iterable[Session] = (),
         id_factory: Callable[[], str] = _new_id,
+        *,
+        fees: Iterable[Fee] = (),
     ) -> None:
         """Initialize the log."""
         self._sessions: dict[str, Session] = {s.id: s for s in sessions}
         self._id_factory = id_factory
+        self._fees: list[Fee] = list(fees)
 
     # --- queries ----------------------------------------------------------
 
@@ -90,12 +95,46 @@ class SessionLog:
         return sorted(result, key=lambda s: s.timestamp)
 
     def summary_for_vehicle(self, vehicle_id: str) -> Summary:
-        """Totals over all sessions of a vehicle."""
-        return summarize(self.sessions(vehicle_id=vehicle_id))
+        """Totals over all sessions and monthly fees of a vehicle."""
+        return summarize(
+            self.sessions(vehicle_id=vehicle_id), self.fees(vehicle_id=vehicle_id)
+        )
 
     def summary_for_tariff(self, tariff_id: str) -> Summary:
-        """Totals over all sessions booked with a tariff."""
-        return summarize(s for s in self.sessions() if s.tariff_id == tariff_id)
+        """Totals over all sessions and monthly fees of a tariff."""
+        return summarize(
+            (s for s in self.sessions() if s.tariff_id == tariff_id),
+            self.fees(tariff_id=tariff_id),
+        )
+
+    def fees(
+        self, vehicle_id: str | None = None, tariff_id: str | None = None
+    ) -> list[Fee]:
+        """Booked monthly fees, sorted by month."""
+        return sorted(
+            (
+                f
+                for f in self._fees
+                if (vehicle_id is None or f.vehicle_id == vehicle_id)
+                and (tariff_id is None or f.tariff_id == tariff_id)
+            ),
+            key=lambda f: (f.month, f.tariff_id),
+        )
+
+    def book_due_fees(self, tariffs: Iterable[Tariff], today: date) -> list[Fee]:
+        """Book all monthly fees due up to today; each month only once.
+
+        Booked fees never change: a later change of the amount, the vehicle
+        or the period only affects months that are not booked yet.
+        """
+        booked: list[Fee] = []
+        for tariff in tariffs:
+            months = {f.month for f in self._fees if f.tariff_id == tariff.id}
+            for month, amount in tariff.due_fees(today, months):
+                fee = Fee(tariff.id, tariff.fee_vehicle_id or "", month, amount)
+                self._fees.append(fee)
+                booked.append(fee)
+        return booked
 
     # --- changes ----------------------------------------------------------
 
@@ -181,12 +220,17 @@ class SessionLog:
         return session
 
     def remove_other_vehicles(self, vehicle_ids: Iterable[str]) -> int:
-        """Delete sessions of vehicles not in `vehicle_ids`; return the count."""
+        """Delete sessions and fees of vehicles not in `vehicle_ids`.
+
+        Returns the number of removed sessions and fees.
+        """
         keep = set(vehicle_ids)
         orphans = [s.id for s in self._sessions.values() if s.vehicle_id not in keep]
         for session_id in orphans:
             del self._sessions[session_id]
-        return len(orphans)
+        fee_count = len(self._fees)
+        self._fees = [f for f in self._fees if f.vehicle_id in keep]
+        return len(orphans) + fee_count - len(self._fees)
 
     def _resolve(self, vehicle_id: str, session_id: str | None) -> Session:
         if session_id is None:
@@ -203,7 +247,10 @@ class SessionLog:
 
     def to_data(self) -> dict[str, Any]:
         """Serialize for the Home Assistant store."""
-        return {"sessions": [s.to_dict() for s in self.sessions()]}
+        return {
+            "sessions": [s.to_dict() for s in self.sessions()],
+            "fees": [f.to_dict() for f in self.fees()],
+        }
 
     @classmethod
     def from_data(
@@ -212,8 +259,12 @@ class SessionLog:
         id_factory: Callable[[], str] = _new_id,
     ) -> SessionLog:
         """Load from store data (already migrated). None means empty store."""
-        sessions = (data or {}).get("sessions", [])
-        return cls((Session.from_dict(s) for s in sessions), id_factory)
+        data = data or {}
+        return cls(
+            (Session.from_dict(s) for s in data.get("sessions", [])),
+            id_factory,
+            fees=(Fee.from_dict(f) for f in data.get("fees", [])),
+        )
 
 
 def _lookup_tariff(
@@ -237,4 +288,6 @@ def migrate(old_major: int, old_minor: int, data: dict[str, Any]) -> dict[str, A
         raise ValueError(f"unsupported storage version {old_major}")
     if old_major == 1 and old_minor < 2:
         data = {**data, "detection": {}}
+    if old_major == 1 and old_minor < 3:
+        data = {**data, "fees": []}
     return data

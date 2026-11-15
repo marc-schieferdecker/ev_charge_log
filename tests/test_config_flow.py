@@ -17,6 +17,13 @@ from custom_components.ev_charge_log.const import DOMAIN
 
 from .conftest import make_subentry, setup_entries
 
+NO_FEE = {
+    "monthly_fee": None,
+    "fee_vehicle_id": None,
+    "fee_start": None,
+    "fee_end": None,
+}
+
 NO_DETECTION = {
     "charging_entity_id": None,
     "soc_entity_id": None,
@@ -207,6 +214,7 @@ async def test_add_tariff(hass: HomeAssistant, tariffs) -> None:
         "price_dc": 0.79,
         "zones": [],
         "versions": [],
+        **NO_FEE,
     }
 
 
@@ -217,7 +225,13 @@ async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) ->
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     data = dict(_sub(tariffs, "Arbeitgeber").data)
-    assert data == {"price_ac": 0.0, "price_dc": None, "zones": [], "versions": []}
+    assert data == {
+        "price_ac": 0.0,
+        "price_dc": None,
+        "zones": [],
+        "versions": [],
+        **NO_FEE,
+    }
 
 
 async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
@@ -231,6 +245,7 @@ async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
         "price_dc": 0.62,
         "zones": [],
         "versions": [],
+        **NO_FEE,
     }
 
 
@@ -273,6 +288,7 @@ async def test_reconfigure_tariff(hass: HomeAssistant, tariffs) -> None:
         "price_dc": None,
         "zones": [],
         "versions": [],
+        **NO_FEE,
     }
 
 
@@ -445,7 +461,12 @@ async def test_add_price_version(hass: HomeAssistant, tariffs) -> None:
     data = tariffs.subentries["enbw"].data
     assert (data["price_ac"], data["price_dc"]) == (0.59, 0.69)  # base unchanged
     assert data["versions"] == [
-        {"valid_from": "2027-01-01", "price_ac": 0.62, "price_dc": 0.72}
+        {
+            "valid_from": "2027-01-01",
+            "price_ac": 0.62,
+            "price_dc": 0.72,
+            "monthly_fee": None,
+        }
     ]
     coord = tariffs.runtime_data
     tariff = coord.tariffs["enbw"]

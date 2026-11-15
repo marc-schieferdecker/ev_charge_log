@@ -82,8 +82,9 @@ async def test_panel_websocket_lists_vehicles(
     ]
     assert seal["stats"][0]["entity"].startswith("sensor.")
     assert seal["stats"][0]["name"] == "Gesamtkosten"
-    assert seal["stats"][4]["name"] == "Letzte Ladung"
-    assert len(seal["stats"]) == 8
+    assert seal["stats"][2]["name"] == "Grundgebühren"
+    assert seal["stats"][5]["name"] == "Letzte Ladung"
+    assert len(seal["stats"]) == 9
     assert result["config_url"] == "/config/integrations/integration/ev_charge_log"
     assert result["texts"]["panel_input"] == "Ladung eintragen"
 

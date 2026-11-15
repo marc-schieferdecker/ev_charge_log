@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 from custom_components.ev_charge_log.models import (
+    Fee,
     PriceVersion,
     Session,
     SessionInput,
@@ -389,6 +390,7 @@ def test_versions_from_dict() -> None:
         "valid_from": "2027-01-01",
         "price_ac": 0.62,
         "price_dc": None,
+        "monthly_fee": None,
     }
 
 
@@ -397,3 +399,102 @@ def test_tariff_without_versions_from_dict() -> None:
     tariff = Tariff.from_dict({"id": "x", "name": "X", "price_ac": 0.4})
     assert tariff.versions == ()
     assert tariff.price_for("ac", date(2030, 1, 1)) == 0.4
+
+
+# --- monthly fee (stage 4) ------------------------------------------------
+
+
+def _fee_tariff(**kwargs) -> Tariff:
+    defaults = {
+        "id": "enbw",
+        "name": "EnBW",
+        "price_dc": 0.69,
+        "monthly_fee": 11.99,
+        "fee_vehicle_id": "seal",
+        "fee_start": date(2026, 10, 15),
+    }
+    defaults.update(kwargs)
+    return Tariff(**defaults)
+
+
+def test_due_fees_every_started_month() -> None:
+    due = _fee_tariff().due_fees(date(2026, 12, 1), set())
+    assert due == [("2026-10", 11.99), ("2026-11", 11.99), ("2026-12", 11.99)]
+
+
+def test_due_fees_skip_booked_months() -> None:
+    due = _fee_tariff().due_fees(date(2026, 12, 31), {"2026-10", "2026-11"})
+    assert due == [("2026-12", 11.99)]
+
+
+def test_due_fees_until_end_month() -> None:
+    tariff = _fee_tariff(fee_end=date(2026, 11, 1))
+    assert [m for m, _ in tariff.due_fees(date(2027, 3, 1), set())] == [
+        "2026-10",
+        "2026-11",
+    ]
+
+
+def test_due_fees_need_vehicle_and_start() -> None:
+    assert _fee_tariff(fee_vehicle_id=None).due_fees(date(2027, 1, 1), set()) == []
+    assert _fee_tariff(fee_start=None).due_fees(date(2027, 1, 1), set()) == []
+
+
+def test_no_fee_amount_books_nothing() -> None:
+    assert _fee_tariff(monthly_fee=None).due_fees(date(2027, 1, 1), set()) == []
+
+
+def test_fee_zero_is_booked() -> None:
+    assert _fee_tariff(monthly_fee=0).due_fees(date(2026, 10, 20), set()) == [
+        ("2026-10", 0.0)
+    ]
+
+
+def test_fee_follows_price_versions() -> None:
+    tariff = _fee_tariff(
+        versions=(
+            PriceVersion(date(2026, 12, 1), price_dc=0.72, monthly_fee=12.99),
+            PriceVersion(date(2027, 2, 15), price_dc=0.75),  # fee unchanged
+        )
+    )
+    due = dict(tariff.due_fees(date(2027, 3, 1), set()))
+    assert due == {
+        "2026-10": 11.99,
+        "2026-11": 11.99,
+        "2026-12": 12.99,
+        "2027-01": 12.99,
+        "2027-02": 12.99,  # version from Feb 15 does not change the fee
+        "2027-03": 12.99,
+    }
+
+
+def test_fee_end_before_start_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _fee_tariff(fee_end=date(2026, 1, 1))
+
+
+def test_summary_includes_fees() -> None:
+    sessions = [build_session("s1", _input(energy_kwh=40.0, tariff_id="enbw"), ENBW)]
+    fees = [Fee("enbw", "seal_u", "2026-11", 11.99)]
+    summary = summarize(sessions, fees)
+    assert summary.total_cost == 35.59
+    assert summary.fee_total == 11.99
+    assert summary.session_count == 1
+    assert summary.total_energy_kwh == 40.0
+    assert summary.average_price_per_kwh == round(35.59 / 40.0, 4)
+
+
+def test_fee_tariff_from_dict() -> None:
+    tariff = Tariff.from_dict(
+        {
+            "id": "enbw",
+            "name": "EnBW",
+            "price_dc": 0.69,
+            "monthly_fee": 11.99,
+            "fee_vehicle_id": "seal",
+            "fee_start": "2026-10-01",
+            "fee_end": None,
+        }
+    )
+    assert tariff.fee_start == date(2026, 10, 1)
+    assert tariff.fee_end is None

@@ -28,7 +28,10 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_change,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
@@ -73,6 +76,7 @@ async def async_get_coordinator(hass: HomeAssistant) -> EvChargeLogCoordinator:
         if (coord := hass.data.get(COORDINATOR_KEY)) is None:
             coord = EvChargeLogCoordinator(hass)
             await coord.async_load()
+            coord.async_start_fee_timer()
             hass.data[COORDINATOR_KEY] = coord
     return coord
 
@@ -80,7 +84,8 @@ async def async_get_coordinator(hass: HomeAssistant) -> EvChargeLogCoordinator:
 @callback
 def async_release_coordinator(hass: HomeAssistant) -> None:
     """Drop the shared coordinator once no entry uses it any more."""
-    hass.data.pop(COORDINATOR_KEY, None)
+    if (coord := hass.data.pop(COORDINATOR_KEY, None)) is not None:
+        coord.async_shutdown()
 
 
 class _SessionStore(Store[dict[str, Any]]):
@@ -125,6 +130,8 @@ class EvChargeLogCoordinator:
         self._unsub_tracking: list[CALLBACK_TYPE] = []
         # State changes are applied one after another, never interleaved.
         self._detection_lock = asyncio.Lock()
+        self._fee_lock = asyncio.Lock()
+        self._unsub_fee_timer: CALLBACK_TYPE | None = None
 
     async def async_load(self) -> None:
         """Load stored sessions and the detection state."""
@@ -168,6 +175,7 @@ class EvChargeLogCoordinator:
         if removed or orphans:
             await self._async_save()
         self._async_start_tracking()
+        await self.async_book_fees()
         self._async_notify()
 
     @callback
@@ -178,6 +186,42 @@ class EvChargeLogCoordinator:
         self.inputs = {}
         self._vehicles_entry_id = None
         self._async_notify()
+
+    # --- monthly fees (stage 4) ----------------------------------------------
+
+    async def async_book_fees(self, *_: Any) -> None:
+        """Book all monthly fees due up to today (local date).
+
+        Runs when vehicles or tariffs are loaded and every night. Only
+        tariffs whose fee vehicle exists are considered, so nothing is booked
+        before the vehicles entry is loaded.
+        """
+        async with self._fee_lock:
+            if not self.vehicles:
+                return
+            tariffs = [
+                t for t in self.tariffs.values() if t.fee_vehicle_id in self.vehicles
+            ]
+            booked = self.log.book_due_fees(tariffs, dt_util.now().date())
+            if booked:
+                _LOGGER.debug("Booked %s monthly fees", len(booked))
+                await self._async_commit()
+
+    @callback
+    def async_start_fee_timer(self) -> None:
+        """Book fees shortly after midnight, when a new month may start."""
+        if self._unsub_fee_timer is None:
+            self._unsub_fee_timer = async_track_time_change(
+                self.hass, self.async_book_fees, hour=0, minute=0, second=30
+            )
+
+    @callback
+    def async_shutdown(self) -> None:
+        """Stop timers and state tracking (last entry unloaded)."""
+        self._async_stop_tracking()
+        if self._unsub_fee_timer is not None:
+            self._unsub_fee_timer()
+            self._unsub_fee_timer = None
 
     # --- charge detection (stage 2) -----------------------------------------
 
@@ -373,6 +417,7 @@ class EvChargeLogCoordinator:
             for sub in entry.get_subentries_of_type(SUBENTRY_TYPE_TARIFF)
         }
         self._async_fix_input_tariffs()
+        self.hass.async_create_task(self.async_book_fees(), f"{DOMAIN} fees")
         self._async_notify()
 
     @callback

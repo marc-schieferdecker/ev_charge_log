@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.ev_charge_log.const import DOMAIN, EVENT_CHARGING_FINISHED
 from custom_components.ev_charge_log.coordinator import STORAGE_KEY
+from custom_components.ev_charge_log.storage import STORAGE_MINOR_VERSION
 
 from .conftest import make_subentry as _sub
 from .conftest import setup_entries
@@ -274,7 +275,7 @@ async def test_restart_while_charging_keeps_start(
     events = async_capture_events(hass, EVENT_CHARGING_FINISHED)
     await _states(hass, (SOC, "31"), (CHARGING, "on"))
     stored = hass_storage[STORAGE_KEY]
-    assert stored["minor_version"] == 2
+    assert stored["minor_version"] == STORAGE_MINOR_VERSION
     assert stored["data"]["detection"]["seal"]["soc_start"] == 31.0
 
     await _states(hass, (SOC, "55"))

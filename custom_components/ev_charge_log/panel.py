@@ -45,6 +45,7 @@ INPUT_ENTITIES = (
 STAT_ENTITIES = (
     ("sensor", "total_cost"),
     ("sensor", "total_energy"),
+    ("sensor", "fee_total"),
     ("sensor", "average_price"),
     ("sensor", "session_count"),
     ("sensor", "last_session_time"),
