@@ -138,6 +138,10 @@ const STYLE = `
     font-size: 18px;
     cursor: pointer;
   }
+  .chart-pager {
+    margin-top: 12px;
+    padding-bottom: 0;
+  }
   .pager button:disabled {
     color: var(--disabled-text-color, var(--secondary-text-color));
     opacity: 0.5;
@@ -247,6 +251,7 @@ class EvChargeLogPanel extends HTMLElement {
     this._charts = new Map(); // vehicle id -> chart card element
     this._lists = new Map(); // vehicle id -> session list card element
     this._page = new Map(); // vehicle id -> page of the session list (0 = newest)
+    this._month = new Map(); // vehicle id -> month shown in the chart ("YYYY-MM")
     this._data = null;
     this._watch = [];
     this._watchSignature = "";
@@ -316,7 +321,13 @@ class EvChargeLogPanel extends HTMLElement {
       this._data = data;
       for (const vehicle of data.vehicles) {
         const chart = this._charts.get(vehicle.id);
-        if (chart) this._fillChartCard(chart, vehicle, data);
+        const month = this._month.get(vehicle.id);
+        if (chart && month && month !== vehicle.history.month) {
+          // An older month is shown: reload that month, not the current one.
+          await this._showMonth(chart, vehicle, month);
+        } else if (chart) {
+          this._fillChartCard(chart, vehicle, data);
+        }
         const list = this._lists.get(vehicle.id);
         if (list) this._fillSessionList(list, vehicle, data);
       }
@@ -357,6 +368,7 @@ class EvChargeLogPanel extends HTMLElement {
     this._cards = [];
     this._charts = new Map();
     this._lists = new Map();
+    this._month = new Map(); // a full reload starts at the current month
     this._data = data;
     this._watch = data.vehicles.flatMap((v) => v.watch || []);
     this._watchSignature = this._signature();
@@ -683,8 +695,40 @@ class EvChargeLogPanel extends HTMLElement {
     return Number(normalized);
   }
 
-  _fillChartCard(card, vehicle, data) {
-    const history = vehicle.history;
+  async _fetchHistory(vehicleId, month) {
+    return this._hass.callWS({
+      type: "ev_charge_log/panel_history",
+      vehicle_id: vehicleId,
+      month,
+    });
+  }
+
+  _shiftMonth(month, delta) {
+    const [year, number] = month.split("-").map(Number);
+    const index = year * 12 + (number - 1) + delta;
+    const shifted = Math.floor(index / 12);
+    return `${shifted}-${String((index % 12) + 1).padStart(2, "0")}`;
+  }
+
+  _monthLabel(month) {
+    const [year, number] = month.split("-").map(Number);
+    return new Date(year, number - 1, 1).toLocaleDateString(this._language(), {
+      month: "long",
+      year: "numeric",
+    });
+  }
+
+  async _showMonth(card, vehicle, month) {
+    try {
+      const history = await this._fetchHistory(vehicle.id, month);
+      this._month.set(vehicle.id, month);
+      this._fillChartCard(card, vehicle, this._data, history);
+    } catch (err) {
+      console.warn("EV Charge Log: loading month failed", err);
+    }
+  }
+
+  _fillChartCard(card, vehicle, data, history = vehicle.history) {
     const texts = data.texts;
     const formatEnergy = (v) => `${this._number(v, 1)} kWh`;
     const formatCost = (v) => this._money(v, data.currency);
@@ -697,7 +741,7 @@ class EvChargeLogPanel extends HTMLElement {
     header.className = "chart-header";
     const title = document.createElement("span");
     title.className = "title";
-    title.textContent = `${vehicle.name} · ${texts.panel_chart_title}`;
+    title.textContent = `${vehicle.name} · ${this._monthLabel(history.month)}`;
     header.appendChild(title);
     body.appendChild(header);
 
@@ -721,6 +765,30 @@ class EvChargeLogPanel extends HTMLElement {
         "var(--warning-color, #ff9800)"
       )
     );
+
+    // Month paging: "<" = previous month, ">" = next month.
+    const pager = document.createElement("div");
+    pager.className = "pager chart-pager";
+    const older = document.createElement("button");
+    older.type = "button";
+    older.textContent = "<";
+    older.title = texts.panel_older_month;
+    older.setAttribute("aria-label", texts.panel_older_month);
+    older.disabled = history.month <= history.first_month;
+    older.addEventListener("click", () =>
+      this._showMonth(card, vehicle, this._shiftMonth(history.month, -1))
+    );
+    const newer = document.createElement("button");
+    newer.type = "button";
+    newer.textContent = ">";
+    newer.title = texts.panel_newer_month;
+    newer.setAttribute("aria-label", texts.panel_newer_month);
+    newer.disabled = history.month >= history.current_month;
+    newer.addEventListener("click", () =>
+      this._showMonth(card, vehicle, this._shiftMonth(history.month, 1))
+    );
+    pager.append(older, newer);
+    body.appendChild(pager);
     card.appendChild(body);
   }
 

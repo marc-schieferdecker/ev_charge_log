@@ -8,6 +8,7 @@ which entities belong to them, and builds Home Assistant cards from that.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +23,8 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
 
 from .const import DOMAIN, PANEL_URL_PATH
-from .coordinator import COORDINATOR_KEY
-from .models import daily_totals
+from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
+from .models import Session, month_of, month_totals
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ PANEL_COMPONENT = "ev-charge-log-panel"
 PANEL_ICON = "mdi:ev-station"
 STATIC_URL = "/ev_charge_log_static"
 WS_TYPE = f"{DOMAIN}/panel"
+WS_HISTORY_TYPE = f"{DOMAIN}/panel_history"
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
 
@@ -61,12 +63,13 @@ TEXT_KEYS = (
     "panel_add",
     "panel_input",
     "panel_stats",
-    "panel_chart_title",
     "panel_chart_energy",
     "panel_chart_cost",
     "panel_sessions",
     "panel_no_sessions",
     "panel_older",
+    "panel_older_month",
+    "panel_newer_month",
     "panel_newer",
     "panel_edit_title",
     "panel_field_date",
@@ -82,7 +85,6 @@ TEXT_KEYS = (
     "panel_delete_confirm",
     "panel_cancel",
 )
-HISTORY_DAYS = 30
 SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
 WATCH_ENTITIES = (
@@ -108,6 +110,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             ]
         )
         websocket_api.async_register_command(hass, websocket_panel)
+        websocket_api.async_register_command(hass, websocket_history)
         hass.data[_SETUP_DONE] = True
 
     # The frontend is a soft dependency (after_dependencies): always loaded in
@@ -148,6 +151,58 @@ async def websocket_panel(
     connection.send_result(msg["id"], await async_panel_data(hass))
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_HISTORY_TYPE,
+        vol.Required("vehicle_id"): str,
+        vol.Required("month"): vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$"),
+    }
+)
+@callback
+def websocket_history(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Daily totals of one vehicle in one calendar month (chart paging)."""
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None or msg["vehicle_id"] not in coord.vehicles:
+        connection.send_error(msg["id"], "not_found", "Unknown vehicle")
+        return
+    connection.send_result(
+        msg["id"], vehicle_history(coord, msg["vehicle_id"], msg["month"])
+    )
+
+
+def vehicle_history(
+    coord: EvChargeLogCoordinator, vehicle_id: str, month: str
+) -> dict[str, Any]:
+    """Energy and session cost per local day of a calendar month.
+
+    Also returns the month of the vehicle's first session and the current
+    month, so the panel knows when to disable "<" and ">". Monthly fees are
+    not included.
+    """
+
+    def local_day(session: Session) -> date:
+        return dt_util.as_local(session.timestamp).date()
+
+    sessions = coord.log.sessions(vehicle_id=vehicle_id)
+    current = month_of(dt_util.now().date())
+    first = month_of(local_day(sessions[0])) if sessions else current
+    totals = month_totals(sessions, month, local_day)
+    return {
+        "month": month,
+        "first_month": min(first, current),
+        "current_month": current,
+        "days": [d.isoformat() for d in totals.days],
+        "energy": totals.energy_kwh,
+        "cost": totals.cost,
+        "total_energy": totals.total_energy_kwh,
+        "total_cost": totals.total_cost,
+    }
+
+
 async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
     """Data for the panel (also used by the tests).
 
@@ -181,23 +236,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                 rows.append({"entity": entity_id, "name": label(platform, key)})
         return rows
 
-    today = dt_util.now().date()
-
-    def history(vehicle_id: str) -> dict[str, Any]:
-        """Energy and session cost per local day, last HISTORY_DAYS days."""
-        totals = daily_totals(
-            coord.log.sessions(vehicle_id=vehicle_id),
-            today,
-            HISTORY_DAYS,
-            lambda s: dt_util.as_local(s.timestamp).date(),
-        )
-        return {
-            "days": [d.isoformat() for d in totals.days],
-            "energy": totals.energy_kwh,
-            "cost": totals.cost,
-            "total_energy": totals.total_energy_kwh,
-            "total_cost": totals.total_cost,
-        }
+    current_month = month_of(dt_util.now().date())
 
     def device_of(platform: str, unique_id: str) -> str | None:
         """Device ID via one of the subentry's entities (for the actions)."""
@@ -238,7 +277,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "device_id": device_of("button", f"{vehicle.id}_book"),
                     "input": entities(vehicle.id, INPUT_ENTITIES),
                     "stats": entities(vehicle.id, STAT_ENTITIES),
-                    "history": history(vehicle.id),
+                    "history": vehicle_history(coord, vehicle.id, current_month),
                     "sessions": sessions(vehicle.id),
                     # The panel redraws the chart when one of these changes.
                     "watch": [

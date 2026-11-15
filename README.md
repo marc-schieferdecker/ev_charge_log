@@ -110,8 +110,8 @@ you enter by hand always win.
 ### Dashboard
 
 EV Charge Log adds a **Charging log** page to the sidebar. Per vehicle it
-shows a chart of the last 30 days (energy and cost per charging day,
-without monthly fees), a card with the input fields to log a session and
+shows a monthly chart (energy and cost per charging day, without monthly
+fees; browse with `<` and `>`), a card with the input fields to log a session and
 the vehicle's statistics, and a list of the sessions. Tap a session to
 correct or delete it. Without vehicles it links to the integration
 settings.

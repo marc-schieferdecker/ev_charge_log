@@ -489,6 +489,16 @@ def daily_totals(
     )
 
 
+def month_totals(
+    sessions: Iterable[Session], month: str, day_of: Callable[[Session], date]
+) -> DailyTotals:
+    """Totals per day for all days of a calendar month ("YYYY-MM")."""
+    year, number = (int(part) for part in month.split("-"))
+    following = date(year + 1, 1, 1) if number == 12 else date(year, number + 1, 1)
+    last = following - timedelta(days=1)
+    return daily_totals(sessions, last, last.day, day_of)
+
+
 @dataclass(frozen=True, slots=True)
 class SocMetrics:
     """Display-only values derived from SoC. Never used for cost or energy."""

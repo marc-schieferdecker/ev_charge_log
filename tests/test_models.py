@@ -17,6 +17,7 @@ from custom_components.ev_charge_log.models import (
     build_session,
     calculate_cost,
     daily_totals,
+    month_totals,
     parse_energy,
     round_money,
     soc_metrics,
@@ -563,3 +564,41 @@ def test_daily_totals_without_sessions() -> None:
     totals = daily_totals([], date(2026, 11, 15), 7, lambda s: s.timestamp.date())
     assert totals.energy_kwh == [0.0] * 7
     assert totals.total_cost == 0
+
+
+@pytest.mark.parametrize(
+    ("month", "days", "first", "last"),
+    [
+        ("2026-11", 30, date(2026, 11, 1), date(2026, 11, 30)),
+        ("2026-12", 31, date(2026, 12, 1), date(2026, 12, 31)),
+        ("2028-02", 29, date(2028, 2, 1), date(2028, 2, 29)),
+    ],
+)
+def test_month_totals_cover_the_calendar_month(
+    month: str, days: int, first: date, last: date
+) -> None:
+    totals = month_totals([], month, lambda s: s.timestamp.date())
+    assert len(totals.days) == days
+    assert (totals.days[0], totals.days[-1]) == (first, last)
+
+
+def test_month_totals_count_only_that_month() -> None:
+    sessions = [
+        build_session(
+            f"s{i}",
+            _input(energy_kwh=kwh, tariff_id="enbw", timestamp=ts),
+            ENBW,
+        )
+        for i, (kwh, ts) in enumerate(
+            [
+                (10.0, datetime(2026, 10, 31, 23, tzinfo=UTC)),
+                (20.0, datetime(2026, 11, 1, 8, tzinfo=UTC)),
+                (5.0, datetime(2026, 11, 30, 20, tzinfo=UTC)),
+                (7.0, datetime(2026, 12, 1, 0, tzinfo=UTC)),
+            ]
+        )
+    ]
+    totals = month_totals(sessions, "2026-11", lambda s: s.timestamp.date())
+    assert totals.total_energy_kwh == 25.0
+    assert totals.energy_kwh[0] == 20.0
+    assert totals.energy_kwh[-1] == 5.0

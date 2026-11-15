@@ -17,6 +17,7 @@ from custom_components.ev_charge_log.panel import (
     PANEL_COMPONENT,
     PANEL_URL_PATH,
     async_panel_data,
+    vehicle_history,
 )
 
 from .conftest import make_subentry as _sub
@@ -152,7 +153,7 @@ async def test_notification_links_to_panel(hass: HomeAssistant) -> None:
     assert "(/ev-charge-log)" in notes["ev_charge_log_charge_seal"]["message"]
 
 
-async def test_panel_history_last_30_days(hass: HomeAssistant, freezer) -> None:
+async def test_panel_history_by_month(hass: HomeAssistant, freezer) -> None:
     await hass.config.async_set_time_zone("Europe/Berlin")
     freezer.move_to("2026-11-15 12:00:00+01:00")
     vehicles, _ = await setup_entries(hass, SUBENTRIES)
@@ -172,7 +173,7 @@ async def test_panel_history_last_30_days(hass: HomeAssistant, freezer) -> None:
                 tariff_id="enbw",
             )
         )
-    # Outside the 30 days and another vehicle: not counted.
+    # Previous month: not in the current month's chart.
     await coord.async_add_session(
         SessionInput(
             vehicle_id="seal",
@@ -187,17 +188,26 @@ async def test_panel_history_last_30_days(hass: HomeAssistant, freezer) -> None:
     result = await async_panel_data(hass)
     seal = next(v for v in result["vehicles"] if v["id"] == "seal")
     history = seal["history"]
+    # The whole current month, future days included (empty).
+    assert history["month"] == "2026-11"
+    assert history["current_month"] == "2026-11"
+    assert history["first_month"] == "2026-10"
     assert len(history["days"]) == 30
-    assert history["days"][-1] == "2026-11-15"
-    assert history["energy"][-1] == 25.0
-    assert history["cost"][-1] == 14.75
-    assert history["energy"][history["days"].index("2026-11-01")] == 12.0
+    assert history["days"][-1] == "2026-11-30"
+    assert history["energy"][history["days"].index("2026-11-15")] == 25.0
+    assert history["cost"][history["days"].index("2026-11-15")] == 14.75
+    assert history["energy"][0] == 12.0
     assert history["total_energy"] == 37.0
     assert result["currency"] == hass.config.currency
     assert len(seal["watch"]) == 4
 
+    october = vehicle_history(coord, "seal", "2026-10")
+    assert len(october["days"]) == 31
+    assert october["total_energy"] == 99.0
+
     dolphin = next(v for v in result["vehicles"] if v["id"] == "dolphin")
     assert dolphin["history"]["total_energy"] == 0
+    assert dolphin["history"]["first_month"] == "2026-11"  # no sessions
 
 
 async def test_panel_lists_sessions_newest_first(hass: HomeAssistant) -> None:
@@ -265,3 +275,37 @@ async def test_panel_list_is_limited(hass: HomeAssistant) -> None:
     result = await async_panel_data(hass)
     dolphin = next(v for v in result["vehicles"] if v["id"] == "dolphin")
     assert len(dolphin["sessions"]) == SESSION_LIST_LIMIT
+
+
+async def test_panel_history_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    await setup_entries(hass, SUBENTRIES)
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_history",
+            "vehicle_id": "seal",
+            "month": "2026-02",
+        }
+    )
+    response = await client.receive_json()
+    assert response["success"]
+    assert response["result"]["month"] == "2026-02"
+    assert len(response["result"]["days"]) == 28
+
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_history",
+            "vehicle_id": "nope",
+            "month": "2026-02",
+        }
+    )
+    assert not (await client.receive_json())["success"]
+
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_history",
+            "vehicle_id": "seal",
+            "month": "2026-13",
+        }
+    )
+    assert not (await client.receive_json())["success"]
