@@ -120,14 +120,28 @@ const STYLE = `
   .session-values {
     text-align: right;
   }
-  button.more {
-    display: block;
-    margin: 8px auto 0;
-    border: none;
+  .pager {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    padding: 8px 16px 0;
+    border-top: 1px solid var(--divider-color);
+  }
+  .pager button {
+    min-width: 40px;
+    padding: 4px 12px;
+    border: 1px solid var(--divider-color);
+    border-radius: 6px;
     background: none;
     color: var(--primary-color);
     font: inherit;
+    font-size: 18px;
     cursor: pointer;
+  }
+  .pager button:disabled {
+    color: var(--disabled-text-color, var(--secondary-text-color));
+    opacity: 0.5;
+    cursor: default;
   }
   .overlay {
     position: fixed;
@@ -223,6 +237,7 @@ const STYLE = `
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DOMAIN = "ev_charge_log";
+const PAGE_SIZE = 5;
 
 class EvChargeLogPanel extends HTMLElement {
   constructor() {
@@ -231,7 +246,7 @@ class EvChargeLogPanel extends HTMLElement {
     this._cards = [];
     this._charts = new Map(); // vehicle id -> chart card element
     this._lists = new Map(); // vehicle id -> session list card element
-    this._shown = new Map(); // vehicle id -> number of sessions shown
+    this._page = new Map(); // vehicle id -> page of the session list (0 = newest)
     this._data = null;
     this._watch = [];
     this._watchSignature = "";
@@ -403,7 +418,10 @@ class EvChargeLogPanel extends HTMLElement {
 
   _fillSessionList(card, vehicle, data) {
     const texts = data.texts;
-    const shown = this._shown.get(vehicle.id) || 10;
+    // Page 0 holds the newest sessions; higher pages are older.
+    const pages = Math.max(1, Math.ceil(vehicle.sessions.length / PAGE_SIZE));
+    const page = Math.min(this._page.get(vehicle.id) || 0, pages - 1);
+    this._page.set(vehicle.id, page);
     card.innerHTML = "";
     const body = document.createElement("div");
     body.className = "list-card";
@@ -420,7 +438,8 @@ class EvChargeLogPanel extends HTMLElement {
       body.appendChild(empty);
     }
 
-    for (const session of vehicle.sessions.slice(0, shown)) {
+    const visible = vehicle.sessions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    for (const session of visible) {
       const row = document.createElement("button");
       row.className = "session";
       row.type = "button";
@@ -448,16 +467,31 @@ class EvChargeLogPanel extends HTMLElement {
       body.appendChild(row);
     }
 
-    if (vehicle.sessions.length > shown) {
-      const more = document.createElement("button");
-      more.className = "more";
-      more.type = "button";
-      more.textContent = texts.panel_more;
-      more.addEventListener("click", () => {
-        this._shown.set(vehicle.id, shown + 10);
-        this._fillSessionList(card, vehicle, this._data || data);
-      });
-      body.appendChild(more);
+    if (vehicle.sessions.length > PAGE_SIZE) {
+      // "<" = back in time (older), ">" = forward in time (newer).
+      const go = (target) => {
+        this._page.set(vehicle.id, target);
+        const current = (this._data || data).vehicles.find((v) => v.id === vehicle.id);
+        this._fillSessionList(card, current || vehicle, this._data || data);
+      };
+      const pager = document.createElement("div");
+      pager.className = "pager";
+      const older = document.createElement("button");
+      older.type = "button";
+      older.textContent = "<";
+      older.title = texts.panel_older;
+      older.setAttribute("aria-label", texts.panel_older);
+      older.disabled = page >= pages - 1;
+      older.addEventListener("click", () => go(page + 1));
+      const newer = document.createElement("button");
+      newer.type = "button";
+      newer.textContent = ">";
+      newer.title = texts.panel_newer;
+      newer.setAttribute("aria-label", texts.panel_newer);
+      newer.disabled = page === 0;
+      newer.addEventListener("click", () => go(page - 1));
+      pager.append(older, newer);
+      body.appendChild(pager);
     }
     card.appendChild(body);
   }
