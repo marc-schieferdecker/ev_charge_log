@@ -17,7 +17,19 @@ control charging, talk to charging provider APIs, or keep a driver's log.
 
 ## Installation
 
-### HACS (custom repository)
+Requires Home Assistant 2025.4 or newer. The integration icon is shown from
+Home Assistant 2026.3 on.
+
+### Marketplace (Home Assistant 2026.11 and newer)
+
+Since 2026.11, HACS is built into Home Assistant as the **Marketplace**.
+EV Charge Log is not in its default list yet, so add it by link:
+
+1. *Settings → Marketplace*, then *Add from link* in the top right corner.
+2. Enter `https://github.com/marc-schieferdecker/ev_charge_log`.
+3. Install **EV Charge Log** and restart Home Assistant.
+
+### HACS (Home Assistant 2026.10 and older)
 
 1. In HACS, open the menu → *Custom repositories*.
 2. Add `https://github.com/marc-schieferdecker/ev_charge_log` with type
@@ -28,8 +40,6 @@ control charging, talk to charging provider APIs, or keep a driver's log.
 
 Copy `custom_components/ev_charge_log` into the `custom_components` folder of
 your Home Assistant configuration and restart Home Assistant.
-
-Requires Home Assistant 2025.4 or newer.
 
 ## Setup
 
@@ -52,8 +62,8 @@ Two entries are created:
   day, so a session you enter later for an earlier date still gets the old
   price. Already booked sessions never change.
 - **Vehicles** – add your vehicles, optionally with battery capacity (used
-  only for display values), a default tariff and the entities for the
-  charge reminder.
+  only for display values), a default tariff, an odometer sensor (for the
+  cost per 100 km) and the entities for the charge reminder.
 
 ## Charge reminder (optional)
 
@@ -126,20 +136,20 @@ input entities to book a session:
 | Input tariff | Preset with the vehicle's default tariff |
 | Input charge type | AC or DC; follows the tariff if it has only one price |
 | Input date (optional) | Day of the session; empty means today. The current time of day is used |
-| Book session | Books the input with the current time and clears it |
-| Reset input | Clears the input without booking |
+| Book session | Books the input and clears it. Time: the entered date, else the end of a detected charge, else now |
+| Reset input | Clears the input without booking (not shown on the Charging log page) |
 
 ### Sensors
 
-Per vehicle: total cost, total energy, average price per kWh (over all
-sessions, including free ones), number of sessions, cost per 100 km (with
-an odometer sensor; charging cost since the first odometer reading,
-without monthly fees), and cost, energy, time
-and tariff of the last session. If you enter SoC values, the charged SoC
+Per vehicle: total cost (including monthly fees), monthly fees, total
+energy, average price per kWh (total cost / total energy, including free
+sessions), number of sessions, cost per 100 km (with an odometer sensor;
+charging cost since the first odometer reading, without monthly fees), and
+cost, energy, time and tariff of the last session. If you enter SoC values, the charged SoC
 points, the calculated charging loss and the cost per SoC point of the last
 session are shown as well – for display only, never used for costs.
 
-Per tariff: total cost and total energy.
+Per tariff: total cost (including its monthly fees) and total energy.
 
 ### Actions
 
@@ -162,12 +172,14 @@ data:
   note: Motorway A7
 ```
 
-Correction rules: changing only the energy keeps the stored price; changing
-the tariff or the charge type uses the tariff's current price; a manually
-entered cost stays until it is changed or cleared.
+Correction rules (also for the edit dialog on the Charging log page):
+changing only the energy keeps the stored price; changing the tariff or the
+charge type uses the tariff's price valid on the session's day; changing
+the day uses the price valid on the new day; a manually entered cost stays
+until it is changed or cleared.
 
-Deleting a vehicle also deletes its sessions. Deleting a tariff keeps the
-sessions with their stored cost.
+Deleting a vehicle also deletes its sessions and monthly fees. Deleting a
+tariff keeps the sessions and fees with their stored cost.
 
 ## License
 
