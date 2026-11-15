@@ -1,0 +1,88 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Set up EV Charge Log. Afterwards, add your vehicles and tariffs to the integration."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "EV Charge Log is already set up. Add vehicles and tariffs to the existing entry."
+    }
+  },
+  "config_subentries": {
+    "vehicle": {
+      "entry_type": "Vehicle",
+      "initiate_flow": {
+        "user": "Add vehicle",
+        "reconfigure": "Edit vehicle"
+      },
+      "step": {
+        "user": {
+          "title": "Add vehicle",
+          "data": {
+            "name": "Name",
+            "battery_capacity_kwh": "Battery capacity",
+            "default_tariff_id": "Default tariff"
+          },
+          "data_description": {
+            "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
+            "default_tariff_id": "Optional. Preselected when entering a session."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit vehicle",
+          "data": {
+            "name": "Name",
+            "battery_capacity_kwh": "Battery capacity",
+            "default_tariff_id": "Default tariff"
+          },
+          "data_description": {
+            "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
+            "default_tariff_id": "Optional. Preselected when entering a session."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Please enter a name.",
+        "name_exists": "A vehicle with this name already exists."
+      }
+    },
+    "tariff": {
+      "entry_type": "Tariff",
+      "initiate_flow": {
+        "user": "Add tariff",
+        "reconfigure": "Edit tariff"
+      },
+      "step": {
+        "user": {
+          "title": "Add tariff",
+          "description": "Prices in {currency} per kWh. A price of 0 is allowed, e.g. for free charging at work or with your own solar power.",
+          "data": {
+            "name": "Name",
+            "price_ac": "Price AC",
+            "price_dc": "Price DC"
+          },
+          "data_description": {
+            "price_dc": "Optional. If empty, the AC price is used for DC charging as well."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit tariff",
+          "description": "Prices in {currency} per kWh. Changes only apply to new sessions; booked sessions keep their stored cost.",
+          "data": {
+            "name": "Name",
+            "price_ac": "Price AC",
+            "price_dc": "Price DC"
+          },
+          "data_description": {
+            "price_dc": "Optional. If empty, the AC price is used for DC charging as well."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Please enter a name.",
+        "name_exists": "A tariff with this name already exists."
+      }
+    }
+  }
+}

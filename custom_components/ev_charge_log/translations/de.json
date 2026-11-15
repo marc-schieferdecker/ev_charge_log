@@ -1,0 +1,88 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "EV Charge Log einrichten. Danach fügst du der Integration deine Fahrzeuge und Tarife hinzu."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "EV Charge Log ist bereits eingerichtet. Füge Fahrzeuge und Tarife dem vorhandenen Eintrag hinzu."
+    }
+  },
+  "config_subentries": {
+    "vehicle": {
+      "entry_type": "Fahrzeug",
+      "initiate_flow": {
+        "user": "Fahrzeug hinzufügen",
+        "reconfigure": "Fahrzeug bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Fahrzeug hinzufügen",
+          "data": {
+            "name": "Name",
+            "battery_capacity_kwh": "Akkukapazität",
+            "default_tariff_id": "Standardtarif"
+          },
+          "data_description": {
+            "battery_capacity_kwh": "Optional. Nur für Anzeigewerte wie den rechnerischen Ladeverlust, nie für Kosten.",
+            "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt."
+          }
+        },
+        "reconfigure": {
+          "title": "Fahrzeug bearbeiten",
+          "data": {
+            "name": "Name",
+            "battery_capacity_kwh": "Akkukapazität",
+            "default_tariff_id": "Standardtarif"
+          },
+          "data_description": {
+            "battery_capacity_kwh": "Optional. Nur für Anzeigewerte wie den rechnerischen Ladeverlust, nie für Kosten.",
+            "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Bitte einen Namen eingeben.",
+        "name_exists": "Ein Fahrzeug mit diesem Namen gibt es bereits."
+      }
+    },
+    "tariff": {
+      "entry_type": "Tarif",
+      "initiate_flow": {
+        "user": "Tarif hinzufügen",
+        "reconfigure": "Tarif bearbeiten"
+      },
+      "step": {
+        "user": {
+          "title": "Tarif hinzufügen",
+          "description": "Preise in {currency} pro kWh. Ein Preis von 0 ist erlaubt, z. B. für kostenloses Laden beim Arbeitgeber oder mit eigenem Solarstrom.",
+          "data": {
+            "name": "Name",
+            "price_ac": "Preis AC",
+            "price_dc": "Preis DC"
+          },
+          "data_description": {
+            "price_dc": "Optional. Ohne Angabe gilt der AC-Preis auch für DC."
+          }
+        },
+        "reconfigure": {
+          "title": "Tarif bearbeiten",
+          "description": "Preise in {currency} pro kWh. Änderungen gelten nur für neue Ladungen, gebuchte Ladungen behalten ihre gespeicherten Kosten.",
+          "data": {
+            "name": "Name",
+            "price_ac": "Preis AC",
+            "price_dc": "Preis DC"
+          },
+          "data_description": {
+            "price_dc": "Optional. Ohne Angabe gilt der AC-Preis auch für DC."
+          }
+        }
+      },
+      "error": {
+        "name_required": "Bitte einen Namen eingeben.",
+        "name_exists": "Einen Tarif mit diesem Namen gibt es bereits."
+      }
+    }
+  }
+}

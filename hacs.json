@@ -1,3 +1,4 @@
 {
-  "name": "EV Charge Log"
+  "name": "EV Charge Log",
+  "homeassistant": "2025.4.0"
 }
