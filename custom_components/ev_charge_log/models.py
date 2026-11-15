@@ -58,6 +58,8 @@ class Vehicle:
     reminder_excluded_zones: tuple[str, ...] = ()
     # Stage 4: notify services of the Companion app (e.g. "mobile_app_pixel")
     notify_services: tuple[str, ...] = ()
+    # Odometer sensor for the cost per 100 km (display value)
+    odometer_entity_id: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the vehicle."""
@@ -77,6 +79,7 @@ class Vehicle:
             location_entity_id=data.get("location_entity_id"),
             reminder_excluded_zones=tuple(data.get("reminder_excluded_zones") or ()),
             notify_services=tuple(data.get("notify_services") or ()),
+            odometer_entity_id=data.get("odometer_entity_id"),
         )
 
 
@@ -487,6 +490,53 @@ def daily_totals(
         energy_kwh=[float(energy[d]) for d in span],
         cost=[float(cost[d]) for d in span],
     )
+
+
+@dataclass(frozen=True, slots=True)
+class OdometerBaseline:
+    """Odometer reading from which on cost per distance is calculated."""
+
+    entity_id: str
+    start: float  # odometer reading in the HA length unit
+    since: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for storage."""
+        return {
+            "entity_id": self.entity_id,
+            "start": self.start,
+            "since": self.since.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OdometerBaseline:
+        """Load from storage."""
+        return cls(
+            entity_id=data["entity_id"],
+            start=float(data["start"]),
+            since=datetime.fromisoformat(data["since"]),
+        )
+
+
+MIN_DISTANCE: float = 1.0
+
+
+def cost_per_100(
+    sessions: Iterable[Session], baseline: OdometerBaseline, odometer: float
+) -> float | None:
+    """Session cost per 100 distance units since the baseline.
+
+    Counts the cost of sessions at or after `baseline.since` (monthly fees
+    are not included). None until at least MIN_DISTANCE was driven.
+    """
+    distance = odometer - baseline.start
+    if distance < MIN_DISTANCE:
+        return None
+    cost = sum(
+        (Decimal(str(s.cost)) for s in sessions if s.timestamp >= baseline.since),
+        Decimal(0),
+    )
+    return round(float(cost) / distance * 100, 2)
 
 
 def month_totals(

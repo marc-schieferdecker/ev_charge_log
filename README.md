@@ -132,7 +132,9 @@ input entities to book a session:
 ### Sensors
 
 Per vehicle: total cost, total energy, average price per kWh (over all
-sessions, including free ones), number of sessions, and cost, energy, time
+sessions, including free ones), number of sessions, cost per 100 km (with
+an odometer sensor; charging cost since the first odometer reading,
+without monthly fees), and cost, energy, time
 and tariff of the last session. If you enter SoC values, the charged SoC
 points, the calculated charging loss and the cost per SoC point of the last
 session are shown as well – for display only, never used for costs.

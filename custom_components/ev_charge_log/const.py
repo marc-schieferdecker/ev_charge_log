@@ -59,6 +59,7 @@ PANEL_URL_PATH: Final = "ev-charge-log"
 
 # Push to phones via the Companion app (stage 4)
 CONF_NOTIFY_SERVICES: Final = "notify_services"
+CONF_ODOMETER_ENTITY_ID: Final = "odometer_entity_id"
 EVENT_MOBILE_APP_ACTION: Final = "mobile_app_notification_action"
 PUSH_ACTION_PREFIX: Final = "EV_CHARGE_LOG_KWH_"
 

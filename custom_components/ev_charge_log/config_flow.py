@@ -36,6 +36,7 @@ from .const import (
     CONF_MONTHLY_FEE,
     CONF_NAME,
     CONF_NOTIFY_SERVICES,
+    CONF_ODOMETER_ENTITY_ID,
     CONF_PRICE_AC,
     CONF_PRICE_DC,
     CONF_REMINDER_EXCLUDED_ZONES,
@@ -72,6 +73,9 @@ _CHARGING_SELECTOR = selector.EntitySelector(
 _SOC_SELECTOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
 _LOCATION_SELECTOR = selector.EntitySelector(
     selector.EntitySelectorConfig(domain=["device_tracker", "person"])
+)
+_ODOMETER_SELECTOR = selector.EntitySelector(
+    selector.EntitySelectorConfig(domain="sensor")
 )
 _ZONES_SELECTOR = selector.EntitySelector(
     selector.EntitySelectorConfig(domain="zone", multiple=True)
@@ -223,6 +227,7 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
             vol.Optional(CONF_CHARGING_ENTITY_ID): _CHARGING_SELECTOR,
             vol.Optional(CONF_SOC_ENTITY_ID): _SOC_SELECTOR,
             vol.Optional(CONF_LOCATION_ENTITY_ID): _LOCATION_SELECTOR,
+            vol.Optional(CONF_ODOMETER_ENTITY_ID): _ODOMETER_SELECTOR,
             vol.Optional(CONF_REMINDER_EXCLUDED_ZONES): _ZONES_SELECTOR,
         }
         phones = self._notify_options()
@@ -271,6 +276,7 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
             CONF_CHARGING_ENTITY_ID: user_input.get(CONF_CHARGING_ENTITY_ID) or None,
             CONF_SOC_ENTITY_ID: user_input.get(CONF_SOC_ENTITY_ID) or None,
             CONF_LOCATION_ENTITY_ID: user_input.get(CONF_LOCATION_ENTITY_ID) or None,
+            CONF_ODOMETER_ENTITY_ID: user_input.get(CONF_ODOMETER_ENTITY_ID) or None,
             CONF_REMINDER_EXCLUDED_ZONES: list(
                 user_input.get(CONF_REMINDER_EXCLUDED_ZONES) or []
             ),

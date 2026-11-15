@@ -300,14 +300,19 @@ def test_from_empty_store() -> None:
 
 
 def test_migrate_current_version_is_noop() -> None:
-    data = {"sessions": [], "detection": {}, "fees": []}
+    data = {"sessions": [], "detection": {}, "fees": [], "odometer": {}}
     assert migrate(STORAGE_VERSION, STORAGE_MINOR_VERSION, data) == data
 
 
 def test_migrate_1_1_adds_detection() -> None:
     session = {"id": "s1"}
     data = migrate(1, 1, {"sessions": [session]})
-    assert data == {"sessions": [session], "detection": {}, "fees": []}
+    assert data == {
+        "sessions": [session],
+        "detection": {},
+        "fees": [],
+        "odometer": {},
+    }
 
 
 def test_migrate_future_version_is_rejected() -> None:

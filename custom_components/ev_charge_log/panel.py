@@ -52,7 +52,8 @@ STAT_ENTITIES = (
     ("sensor", "total_energy"),
     ("sensor", "fee_total"),
     ("sensor", "average_price"),
-    ("sensor", "session_count"),
+    # Instead of the number of sessions (user request); that sensor stays.
+    ("sensor", "cost_per_100"),
     ("sensor", "last_session_time"),
     ("sensor", "last_session_cost"),
     ("sensor", "last_session_energy"),

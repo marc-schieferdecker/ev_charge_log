@@ -26,6 +26,7 @@
             "charging_entity_id": "Ladestatus",
             "soc_entity_id": "Ladezustand (SoC)",
             "location_entity_id": "Standort",
+            "odometer_entity_id": "Kilometerstand",
             "reminder_excluded_zones": "Zonen ohne Erinnerung",
             "notify_services": "Handys benachrichtigen"
           },
@@ -35,6 +36,7 @@
             "charging_entity_id": "Optional. Binärsensor, der während des Ladens „an“ ist. Aktiviert die Erinnerung nach dem Laden. Hat deine Fahrzeugintegration keinen, lege einen Template-Binärsensor an.",
             "soc_entity_id": "Optional. SoC in Prozent, wird bei Ladebeginn und Ladeende gemerkt. Nur Anzeige, nie für Kosten.",
             "location_entity_id": "Optional. Device Tracker oder Person. Bestimmt den Tarif der Zone, in der die Ladung endet.",
+            "odometer_entity_id": "Optional. Kilometerstand-Sensor für die Kosten pro 100 km. Gezählt ab dem ersten Wert, nur Ladekosten ohne Grundgebühren.",
             "reminder_excluded_zones": "Optional. Nach dem Laden in diesen Zonen kommt keine Erinnerung.",
             "notify_services": "Optional. Handys mit der Home-Assistant-App, die die Erinnerung bekommen. Die kWh lassen sich direkt in die Benachrichtigung eintippen, um die Ladung zu buchen."
           }
@@ -48,6 +50,7 @@
             "charging_entity_id": "Ladestatus",
             "soc_entity_id": "Ladezustand (SoC)",
             "location_entity_id": "Standort",
+            "odometer_entity_id": "Kilometerstand",
             "reminder_excluded_zones": "Zonen ohne Erinnerung",
             "notify_services": "Handys benachrichtigen"
           },
@@ -57,6 +60,7 @@
             "charging_entity_id": "Optional. Binärsensor, der während des Ladens „an“ ist. Aktiviert die Erinnerung nach dem Laden. Hat deine Fahrzeugintegration keinen, lege einen Template-Binärsensor an.",
             "soc_entity_id": "Optional. SoC in Prozent, wird bei Ladebeginn und Ladeende gemerkt. Nur Anzeige, nie für Kosten.",
             "location_entity_id": "Optional. Device Tracker oder Person. Bestimmt den Tarif der Zone, in der die Ladung endet.",
+            "odometer_entity_id": "Optional. Kilometerstand-Sensor für die Kosten pro 100 km. Gezählt ab dem ersten Wert, nur Ladekosten ohne Grundgebühren.",
             "reminder_excluded_zones": "Optional. Nach dem Laden in diesen Zonen kommt keine Erinnerung.",
             "notify_services": "Optional. Handys mit der Home-Assistant-App, die die Erinnerung bekommen. Die kWh lassen sich direkt in die Benachrichtigung eintippen, um die Ladung zu buchen."
           }
@@ -169,6 +173,7 @@
       "total_energy": { "name": "Gesamtenergie" },
       "fee_total": { "name": "Grundgebühren" },
       "average_price": { "name": "Durchschnittspreis" },
+      "cost_per_100": { "name": "Kosten pro 100 {length}" },
       "session_count": { "name": "Ladungen" },
       "last_session_cost": { "name": "Letzte Ladung Kosten" },
       "last_session_energy": { "name": "Letzte Ladung Energie" },

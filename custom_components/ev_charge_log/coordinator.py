@@ -37,6 +37,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
+from homeassistant.util.unit_conversion import DistanceConverter
 
 from .const import (
     CHARGE_TYPE_AC,
@@ -59,11 +60,13 @@ from .detection import (
     on_charging_state,
 )
 from .models import (
+    OdometerBaseline,
     Session,
     SessionInput,
     Tariff,
     ValidationError,
     Vehicle,
+    cost_per_100,
     parse_energy,
 )
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
@@ -133,6 +136,7 @@ class EvChargeLogCoordinator:
         self.log = SessionLog()
         self._unsub_push_listener: CALLBACK_TYPE | None = None
         self.detection: dict[str, DetectionState] = {}
+        self.odometer: dict[str, OdometerBaseline] = {}
         self.vehicles: dict[str, Vehicle] = {}
         self.tariffs: dict[str, Tariff] = {}
         self.inputs: dict[str, VehicleInput] = {}
@@ -152,12 +156,17 @@ class EvChargeLogCoordinator:
             vehicle_id: DetectionState.from_dict(state)
             for vehicle_id, state in (data.get("detection") or {}).items()
         }
+        self.odometer = {
+            vehicle_id: OdometerBaseline.from_dict(baseline)
+            for vehicle_id, baseline in (data.get("odometer") or {}).items()
+        }
 
     async def _async_save(self) -> None:
         await self._store.async_save(
             {
                 **self.log.to_data(),
                 "detection": {v: s.to_dict() for v, s in self.detection.items()},
+                "odometer": {v: b.to_dict() for v, b in self.odometer.items()},
             }
         )
 
@@ -181,6 +190,19 @@ class EvChargeLogCoordinator:
         orphans = [v for v in self.detection if v not in self.vehicles]
         for vehicle_id in orphans:
             del self.detection[vehicle_id]
+        # Odometer baselines of deleted vehicles or without odometer sensor.
+        stale = [
+            v
+            for v, baseline in self.odometer.items()
+            if v not in self.vehicles
+            or self.vehicles[v].odometer_entity_id != baseline.entity_id
+        ]
+        for vehicle_id in stale:
+            del self.odometer[vehicle_id]
+        orphans += stale
+        for vehicle_id in self.vehicles:
+            if self._set_odometer_baseline(vehicle_id):
+                orphans.append(vehicle_id)  # changed: save below
         if removed:
             _LOGGER.info("Removed %s sessions of deleted vehicles", removed)
         if removed or orphans:
@@ -197,6 +219,54 @@ class EvChargeLogCoordinator:
         self.inputs = {}
         self._vehicles_entry_id = None
         self._async_notify()
+
+    # --- cost per 100 km (display value) ------------------------------------
+
+    def odometer_reading(self, vehicle: Vehicle) -> float | None:
+        """Current odometer in the HA length unit; None if not available."""
+        if not vehicle.odometer_entity_id:
+            return None
+        state = self.hass.states.get(vehicle.odometer_entity_id)
+        if state is None:
+            return None
+        try:
+            value = float(state.state)
+        except ValueError:
+            return None
+        unit = state.attributes.get("unit_of_measurement")
+        target = self.hass.config.units.length_unit
+        if unit and unit != target and unit in DistanceConverter.VALID_UNITS:
+            value = DistanceConverter.convert(value, unit, target)
+        return value
+
+    def _set_odometer_baseline(self, vehicle_id: str) -> bool:
+        """Remember the first valid odometer reading; True if it was set."""
+        vehicle = self.vehicles[vehicle_id]
+        if vehicle_id in self.odometer or not vehicle.odometer_entity_id:
+            return False
+        reading = self.odometer_reading(vehicle)
+        if reading is None:
+            return False
+        self.odometer[vehicle_id] = OdometerBaseline(
+            vehicle.odometer_entity_id, reading, dt_util.now()
+        )
+        return True
+
+    async def async_odometer_changed(self, vehicle_id: str) -> None:
+        """Called by the sensor; sets the baseline once a value is valid."""
+        if vehicle_id in self.vehicles and self._set_odometer_baseline(vehicle_id):
+            await self._async_save()
+
+    def cost_per_100(self, vehicle_id: str) -> float | None:
+        """Session cost per 100 km (or mi) since the odometer baseline."""
+        baseline = self.odometer.get(vehicle_id)
+        vehicle = self.vehicles.get(vehicle_id)
+        if baseline is None or vehicle is None:
+            return None
+        reading = self.odometer_reading(vehicle)
+        if reading is None:
+            return None
+        return cost_per_100(self.log.sessions(vehicle_id=vehicle_id), baseline, reading)
 
     # --- monthly fees (stage 4) ----------------------------------------------
 

@@ -30,6 +30,7 @@ NO_DETECTION = {
     "location_entity_id": None,
     "reminder_excluded_zones": [],
     "notify_services": [],
+    "odometer_entity_id": None,
 }
 
 

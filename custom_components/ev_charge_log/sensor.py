@@ -14,9 +14,10 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import PERCENTAGE, UnitOfEnergy
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import CONF_KIND, KIND_VEHICLES
 from .coordinator import EvChargeLogConfigEntry, EvChargeLogCoordinator
@@ -37,6 +38,8 @@ class EvChargeLogSensorDescription(SensorEntityDescription):
 
     value_fn: ValueFn
     attrs_fn: Callable[[EvChargeLogCoordinator, str], dict[str, Any]] | None = None
+    # Also update when the vehicle's odometer sensor changes.
+    tracks_odometer: bool = False
 
 
 def _last(coord: EvChargeLogCoordinator, vehicle_id: str) -> Session | None:
@@ -127,6 +130,14 @@ VEHICLE_SENSORS: tuple[EvChargeLogSensorDescription, ...] = (
         native_unit_of_measurement=_CURRENCY_PER_KWH,
         suggested_display_precision=3,
         value_fn=lambda c, v: c.log.summary_for_vehicle(v).average_price_per_kwh,
+    ),
+    EvChargeLogSensorDescription(
+        key="cost_per_100",
+        translation_key="cost_per_100",
+        native_unit_of_measurement="{currency}/100 {length}",
+        suggested_display_precision=2,
+        value_fn=lambda c, v: c.cost_per_100(v),
+        tracks_odometer=True,
     ),
     EvChargeLogSensorDescription(
         key="session_count",
@@ -248,11 +259,34 @@ class EvChargeLogSensor(EvChargeLogEntity, SensorEntity):
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coord, subentry_id, device, description)
+        length = str(coord.hass.config.units.length_unit)
         unit = description.native_unit_of_measurement
-        if unit is not None and "{currency}" in unit:
+        if unit is not None and "{" in unit:
             self._attr_native_unit_of_measurement = unit.format(
-                currency=coord.hass.config.currency
+                currency=coord.hass.config.currency, length=length
             )
+        if description.tracks_odometer:
+            # Name "Cost per 100 {length}": km or mi from the HA unit system.
+            self._attr_translation_placeholders = {"length": length}
+
+    async def async_added_to_hass(self) -> None:
+        """Follow the session log and, for cost per distance, the odometer."""
+        await super().async_added_to_hass()
+        vehicle = self._coord.vehicles.get(self._subentry_id)
+        if not self.entity_description.tracks_odometer or vehicle is None:
+            return
+        if not vehicle.odometer_entity_id:
+            return
+
+        async def _odometer_changed(_event: Event) -> None:
+            await self._coord.async_odometer_changed(self._subentry_id)
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_track_state_change_event(
+                self.hass, [vehicle.odometer_entity_id], _odometer_changed
+            )
+        )
 
     @property
     def native_value(self) -> Any:

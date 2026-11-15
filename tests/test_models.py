@@ -9,6 +9,7 @@ import pytest
 
 from custom_components.ev_charge_log.models import (
     Fee,
+    OdometerBaseline,
     PriceVersion,
     Session,
     SessionInput,
@@ -16,6 +17,7 @@ from custom_components.ev_charge_log.models import (
     ValidationError,
     build_session,
     calculate_cost,
+    cost_per_100,
     daily_totals,
     month_totals,
     parse_energy,
@@ -602,3 +604,50 @@ def test_month_totals_count_only_that_month() -> None:
     assert totals.total_energy_kwh == 25.0
     assert totals.energy_kwh[0] == 20.0
     assert totals.energy_kwh[-1] == 5.0
+
+
+# --- cost per 100 km --------------------------------------------------------
+
+
+def _session_at(session_id: str, ts: datetime, kwh: float) -> Session:
+    return build_session(
+        session_id, _input(energy_kwh=kwh, tariff_id="enbw", timestamp=ts), ENBW
+    )
+
+
+BASELINE = OdometerBaseline(
+    "sensor.seal_odometer", 12000.0, datetime(2026, 11, 1, tzinfo=UTC)
+)
+
+
+def test_cost_per_100_counts_sessions_since_baseline() -> None:
+    sessions = [
+        _session_at("old", datetime(2026, 10, 31, tzinfo=UTC), 40.0),  # 23.60
+        _session_at("a", datetime(2026, 11, 2, tzinfo=UTC), 40.0),  # 23.60
+        _session_at("b", datetime(2026, 11, 9, tzinfo=UTC), 20.0),  # 11.80
+    ]
+    # 35.40 over 400 km -> 8.85 per 100 km
+    assert cost_per_100(sessions, BASELINE, 12400.0) == 8.85
+
+
+def test_cost_per_100_needs_some_distance() -> None:
+    sessions = [_session_at("a", datetime(2026, 11, 2, tzinfo=UTC), 40.0)]
+    assert cost_per_100(sessions, BASELINE, 12000.0) is None
+    assert cost_per_100(sessions, BASELINE, 11990.0) is None
+
+
+def test_cost_per_100_free_charging_is_zero() -> None:
+    free = build_session(
+        "f",
+        _input(
+            energy_kwh=30.0,
+            tariff_id="free",
+            timestamp=datetime(2026, 11, 2, tzinfo=UTC),
+        ),
+        FREE,
+    )
+    assert cost_per_100([free], BASELINE, 12200.0) == 0.0
+
+
+def test_odometer_baseline_roundtrip() -> None:
+    assert OdometerBaseline.from_dict(BASELINE.to_dict()) == BASELINE

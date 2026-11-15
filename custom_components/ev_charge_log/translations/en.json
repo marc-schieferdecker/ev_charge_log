@@ -26,6 +26,7 @@
             "charging_entity_id": "Charging status",
             "soc_entity_id": "State of charge (SoC)",
             "location_entity_id": "Location",
+            "odometer_entity_id": "Odometer",
             "reminder_excluded_zones": "Zones without reminder",
             "notify_services": "Notify phones"
           },
@@ -35,6 +36,7 @@
             "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
             "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
             "location_entity_id": "Optional. Device tracker or person. Selects the tariff of the zone the charge ends in.",
+            "odometer_entity_id": "Optional. Odometer sensor for the cost per 100 km. Counted from the first reading on; charging costs only, without monthly fees.",
             "reminder_excluded_zones": "Optional. No reminder after charging in these zones.",
             "notify_services": "Optional. Phones with the Home Assistant Companion app that get the reminder. You can type the kWh directly into the notification to book the session."
           }
@@ -48,6 +50,7 @@
             "charging_entity_id": "Charging status",
             "soc_entity_id": "State of charge (SoC)",
             "location_entity_id": "Location",
+            "odometer_entity_id": "Odometer",
             "reminder_excluded_zones": "Zones without reminder",
             "notify_services": "Notify phones"
           },
@@ -57,6 +60,7 @@
             "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
             "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
             "location_entity_id": "Optional. Device tracker or person. Selects the tariff of the zone the charge ends in.",
+            "odometer_entity_id": "Optional. Odometer sensor for the cost per 100 km. Counted from the first reading on; charging costs only, without monthly fees.",
             "reminder_excluded_zones": "Optional. No reminder after charging in these zones.",
             "notify_services": "Optional. Phones with the Home Assistant Companion app that get the reminder. You can type the kWh directly into the notification to book the session."
           }
@@ -169,6 +173,7 @@
       "total_energy": { "name": "Total energy" },
       "fee_total": { "name": "Monthly fees" },
       "average_price": { "name": "Average price" },
+      "cost_per_100": { "name": "Cost per 100 {length}" },
       "session_count": { "name": "Sessions" },
       "last_session_cost": { "name": "Last session cost" },
       "last_session_energy": { "name": "Last session energy" },

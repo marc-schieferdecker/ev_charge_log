@@ -29,7 +29,8 @@ from .models import (
 STORAGE_VERSION: Final = 1
 # 1.1: sessions. 1.2: + charge detection state per vehicle ("detection").
 # 1.3: + booked monthly fees ("fees").
-STORAGE_MINOR_VERSION: Final = 3
+# 1.4: + odometer baseline per vehicle ("odometer").
+STORAGE_MINOR_VERSION: Final = 4
 
 
 class SessionNotFoundError(LookupError):
@@ -290,4 +291,6 @@ def migrate(old_major: int, old_minor: int, data: dict[str, Any]) -> dict[str, A
         data = {**data, "detection": {}}
     if old_major == 1 and old_minor < 3:
         data = {**data, "fees": []}
+    if old_major == 1 and old_minor < 4:
+        data = {**data, "odometer": {}}
     return data
