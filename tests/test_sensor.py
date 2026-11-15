@@ -9,13 +9,10 @@ import pytest
 
 pytest.importorskip("pytest_homeassistant_custom_component")
 
-from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-)
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ev_charge_log.const import DOMAIN
 from custom_components.ev_charge_log.coordinator import (
@@ -27,17 +24,10 @@ from custom_components.ev_charge_log.models import (
     ValidationError,
 )
 
+from .conftest import make_subentry as _sub
+from .conftest import setup_entries
+
 T0 = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
-
-
-def _sub(subentry_type: str, subentry_id: str, title: str, **data: Any):
-    return ConfigSubentryData(
-        data=data,
-        subentry_id=subentry_id,
-        subentry_type=subentry_type,
-        title=title,
-        unique_id=None,
-    )
 
 
 SUBENTRIES = [
@@ -55,14 +45,19 @@ SUBENTRIES = [
 
 
 @pytest.fixture
-async def entry(hass: HomeAssistant) -> MockConfigEntry:
-    entry = MockConfigEntry(
-        domain=DOMAIN, title="EV Charge Log", data={}, subentries_data=SUBENTRIES
-    )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    return entry
+async def entries(hass: HomeAssistant) -> tuple[MockConfigEntry, MockConfigEntry]:
+    return await setup_entries(hass, SUBENTRIES)
+
+
+@pytest.fixture
+def entry(entries) -> MockConfigEntry:
+    """The vehicles entry."""
+    return entries[0]
+
+
+@pytest.fixture
+def tariffs_entry(entries) -> MockConfigEntry:
+    return entries[1]
 
 
 def _coord(entry: MockConfigEntry) -> EvChargeLogCoordinator:
@@ -89,9 +84,13 @@ def _input(**kwargs: Any) -> SessionInput:
     return SessionInput(**defaults)
 
 
-async def test_entities_are_created_per_subentry(hass: HomeAssistant, entry) -> None:
+async def test_entities_are_created_per_subentry(
+    hass: HomeAssistant, entry, tariffs_entry
+) -> None:
     registry = er.async_get(hass)
-    entities = er.async_entries_for_config_entry(registry, entry.entry_id)
+    entities = er.async_entries_for_config_entry(
+        registry, entry.entry_id
+    ) + er.async_entries_for_config_entry(registry, tariffs_entry.entry_id)
     by_subentry: dict[str | None, int] = {}
     for ent in entities:
         by_subentry[ent.config_subentry_id] = (
@@ -187,16 +186,40 @@ async def test_sessions_are_persisted(
     assert stored["version"] == 1
     assert stored["data"]["sessions"][0]["cost"] == 23.60
 
-    assert await hass.config_entries.async_reload(entry.entry_id)
+    # Unload both entries (drops the shared state) and load again from storage.
+    for e in hass.config_entries.async_entries(DOMAIN):
+        assert await hass.config_entries.async_unload(e.entry_id)
+    assert DOMAIN not in hass.data
+    for e in hass.config_entries.async_entries(DOMAIN):
+        assert await hass.config_entries.async_setup(e.entry_id)
     await hass.async_block_till_done()
     assert _state(hass, "seal", "total_cost").state == "23.6"
+    assert _state(hass, "enbw", "total_cost").state == "23.6"
 
 
-async def test_tariff_change_keeps_booked_sessions(hass: HomeAssistant, entry) -> None:
+async def test_tariffs_follow_after_vehicle_entry(
+    hass: HomeAssistant, entry, tariffs_entry
+) -> None:
+    """Vehicle entities pick up tariff changes of the other entry live."""
+    select = er.async_get(hass).async_get_entity_id(
+        "select", DOMAIN, "seal_input_tariff"
+    )
+    assert await hass.config_entries.async_unload(tariffs_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(select).state == "unavailable"
+
+    assert await hass.config_entries.async_setup(tariffs_entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(select).state == "EnBW"
+
+
+async def test_tariff_change_keeps_booked_sessions(
+    hass: HomeAssistant, entry, tariffs_entry
+) -> None:
     await _coord(entry).async_add_session(_input())
-    enbw = entry.subentries["enbw"]
+    enbw = tariffs_entry.subentries["enbw"]
     hass.config_entries.async_update_subentry(
-        entry, enbw, data={"price_ac": 0.99, "price_dc": 0.99}
+        tariffs_entry, enbw, data={"price_ac": 0.99, "price_dc": 0.99}
     )
     await hass.async_block_till_done()  # update listener reloads the entry
 

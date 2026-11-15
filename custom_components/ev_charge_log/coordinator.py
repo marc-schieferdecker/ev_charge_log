@@ -1,11 +1,16 @@
 """Runtime state for EV Charge Log: sessions, vehicles, tariffs, listeners.
 
+There is one coordinator per Home Assistant instance, shared by the two
+config entries ("vehicles" and "tariffs"). Each entry registers its
+subentries here on setup and removes them on unload.
+
 All calculation lives in models.py / storage.py. This module only wires
 them to Home Assistant (storage, config subentries, entity updates).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -15,6 +20,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.storage import Store
+from homeassistant.util.hass_dict import HassKey
 
 from .const import (
     CHARGE_TYPE_AC,
@@ -30,6 +36,27 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_KEY = f"{DOMAIN}.sessions"
 
 type EvChargeLogConfigEntry = ConfigEntry[EvChargeLogCoordinator]
+
+COORDINATOR_KEY: HassKey[EvChargeLogCoordinator] = HassKey(DOMAIN)
+_LOCK_KEY: HassKey[asyncio.Lock] = HassKey(f"{DOMAIN}_lock")
+
+
+async def async_get_coordinator(hass: HomeAssistant) -> EvChargeLogCoordinator:
+    """Return the shared coordinator, loading the session store once."""
+    if (coord := hass.data.get(COORDINATOR_KEY)) is not None:
+        return coord
+    async with hass.data.setdefault(_LOCK_KEY, asyncio.Lock()):
+        if (coord := hass.data.get(COORDINATOR_KEY)) is None:
+            coord = EvChargeLogCoordinator(hass)
+            await coord.async_load()
+            hass.data[COORDINATOR_KEY] = coord
+    return coord
+
+
+@callback
+def async_release_coordinator(hass: HomeAssistant) -> None:
+    """Drop the shared coordinator once no entry uses it any more."""
+    hass.data.pop(COORDINATOR_KEY, None)
 
 
 class _SessionStore(Store[dict[str, Any]]):
@@ -57,8 +84,8 @@ class VehicleInput:
 class EvChargeLogCoordinator:
     """Holds the session log and notifies entities after every change."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize from the config entry's subentries."""
+    def __init__(self, hass: HomeAssistant) -> None:
+        """Initialize empty; entries register vehicles and tariffs."""
         self.hass = hass
         self._store = _SessionStore(
             hass, STORAGE_VERSION, STORAGE_KEY, minor_version=STORAGE_MINOR_VERSION
@@ -66,30 +93,66 @@ class EvChargeLogCoordinator:
         self.log = SessionLog()
         self.vehicles: dict[str, Vehicle] = {}
         self.tariffs: dict[str, Tariff] = {}
-        self._listeners: list[CALLBACK_TYPE] = []
-        self._load_subentries(entry)
         self.inputs: dict[str, VehicleInput] = {}
-        for vehicle_id in self.vehicles:
-            self.inputs[vehicle_id] = VehicleInput()
-            self._reset_input(vehicle_id)
-
-    def _load_subentries(self, entry: ConfigEntry) -> None:
-        for sub in entry.get_subentries_of_type(SUBENTRY_TYPE_VEHICLE):
-            self.vehicles[sub.subentry_id] = Vehicle.from_dict(
-                {**sub.data, "id": sub.subentry_id, "name": sub.title}
-            )
-        for sub in entry.get_subentries_of_type(SUBENTRY_TYPE_TARIFF):
-            self.tariffs[sub.subentry_id] = Tariff.from_dict(
-                {**sub.data, "id": sub.subentry_id, "name": sub.title}
-            )
+        self._listeners: list[CALLBACK_TYPE] = []
 
     async def async_load(self) -> None:
-        """Load stored sessions; drop those of deleted vehicles."""
+        """Load stored sessions."""
         self.log = SessionLog.from_data(await self._store.async_load())
+
+    # --- registration by the config entries ---------------------------------
+
+    async def async_set_vehicles(self, entry: ConfigEntry) -> None:
+        """Take the vehicles from the vehicles entry; drop orphaned sessions."""
+        self.vehicles = {
+            sub.subentry_id: Vehicle.from_dict(
+                {**sub.data, "id": sub.subentry_id, "name": sub.title}
+            )
+            for sub in entry.get_subentries_of_type(SUBENTRY_TYPE_VEHICLE)
+        }
+        self.inputs = {}
+        for vehicle_id in self.vehicles:
+            self._reset_input(vehicle_id)
+        # The vehicles entry is the complete list: sessions of vehicles that
+        # are not in it belong to deleted vehicles and are removed with them.
         removed = self.log.remove_other_vehicles(self.vehicles)
         if removed:
             _LOGGER.info("Removed %s sessions of deleted vehicles", removed)
             await self._store.async_save(self.log.to_data())
+        self._async_notify()
+
+    @callback
+    def async_clear_vehicles(self) -> None:
+        """Forget the vehicles (vehicles entry unloaded)."""
+        self.vehicles = {}
+        self.inputs = {}
+        self._async_notify()
+
+    @callback
+    def async_set_tariffs(self, entry: ConfigEntry) -> None:
+        """Take the tariffs from the tariffs entry."""
+        self.tariffs = {
+            sub.subentry_id: Tariff.from_dict(
+                {**sub.data, "id": sub.subentry_id, "name": sub.title}
+            )
+            for sub in entry.get_subentries_of_type(SUBENTRY_TYPE_TARIFF)
+        }
+        self._async_fix_input_tariffs()
+        self._async_notify()
+
+    @callback
+    def async_clear_tariffs(self) -> None:
+        """Forget the tariffs (tariffs entry unloaded)."""
+        self.tariffs = {}
+        self._async_fix_input_tariffs()
+        self._async_notify()
+
+    @callback
+    def _async_fix_input_tariffs(self) -> None:
+        """Replace input tariffs that no longer exist by the default."""
+        for vehicle_id, current in self.inputs.items():
+            if current.tariff_id not in self.tariffs:
+                current.tariff_id = self.default_tariff_id(vehicle_id)
 
     # --- listeners --------------------------------------------------------
 

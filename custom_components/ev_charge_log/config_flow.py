@@ -1,7 +1,8 @@
 """Config flow for EV Charge Log.
 
-One central config entry; vehicles and tariffs are config subentries.
-The subentry title is the display name, the subentry ID the stable ID.
+Two config entries, so Home Assistant shows them as two groups: "vehicles"
+with vehicle subentries and "tariffs" with tariff subentries. The subentry
+title is the display name, the subentry ID the stable ID.
 """
 
 from __future__ import annotations
@@ -19,18 +20,22 @@ from homeassistant.config_entries import (
     ConfigSubentryFlow,
     SubentryFlowResult,
 )
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
     CONF_DEFAULT_TARIFF_ID,
+    CONF_KIND,
     CONF_NAME,
     CONF_PRICE_AC,
     CONF_PRICE_DC,
     DOMAIN,
+    KIND_TARIFFS,
+    KINDS,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
+    entry_title,
 )
 
 _PRICE_SELECTOR = selector.NumberSelector(
@@ -49,10 +54,16 @@ _CAPACITY_SELECTOR = selector.NumberSelector(
 _NAME_SELECTOR = selector.TextSelector()
 
 
-class EvChargeLogConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Create the single EV Charge Log entry."""
+def _tariff_subentries(hass: HomeAssistant) -> list[ConfigSubentry]:
+    """Tariffs of the tariffs entry (empty if it does not exist yet)."""
+    entry = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, KIND_TARIFFS)
+    return entry.get_subentries_of_type(SUBENTRY_TYPE_TARIFF) if entry else []
 
-    VERSION = 1
+
+class EvChargeLogConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Create the vehicles and the tariffs entry (one of each)."""
+
+    VERSION = 2
     MINOR_VERSION = 1
 
     @classmethod
@@ -60,19 +71,39 @@ class EvChargeLogConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_supported_subentry_types(
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        """Return the subentry types: vehicles and tariffs."""
-        return {
-            SUBENTRY_TYPE_VEHICLE: VehicleSubentryFlow,
-            SUBENTRY_TYPE_TARIFF: TariffSubentryFlow,
-        }
+        """Vehicles entry: vehicle subentries; tariffs entry: tariff subentries."""
+        if config_entry.data.get(CONF_KIND) == KIND_TARIFFS:
+            return {SUBENTRY_TYPE_TARIFF: TariffSubentryFlow}
+        return {SUBENTRY_TYPE_VEHICLE: VehicleSubentryFlow}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Confirm setup. Single instance is enforced via manifest."""
+        """Set up the integration; the second entry is created automatically."""
+        missing = [
+            kind
+            for kind in KINDS
+            if not self.hass.config_entries.async_entry_for_domain_unique_id(
+                DOMAIN, kind
+            )
+        ]
+        if not missing:
+            return self.async_abort(reason="already_configured")
         if user_input is not None:
-            return self.async_create_entry(title="EV Charge Log", data={})
+            return await self._async_create(missing[0])
         return self.async_show_form(step_id="user")
+
+    async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
+        """Create the missing companion entry (started by async_setup_entry)."""
+        return await self._async_create(import_data[CONF_KIND])
+
+    async def _async_create(self, kind: str) -> ConfigFlowResult:
+        await self.async_set_unique_id(kind)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(
+            title=entry_title(kind, self.hass.config.language),
+            data={CONF_KIND: kind},
+        )
 
 
 class _NamedSubentryFlow(ConfigSubentryFlow):
@@ -133,7 +164,7 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
     """Add or change a vehicle (stage 1 fields only)."""
 
     def _schema(self) -> vol.Schema:
-        tariffs = self._get_entry().get_subentries_of_type(SUBENTRY_TYPE_TARIFF)
+        tariffs = _tariff_subentries(self.hass)
         fields: dict[Any, Any] = {
             vol.Required(CONF_NAME): _NAME_SELECTOR,
             vol.Optional(CONF_BATTERY_CAPACITY_KWH): _CAPACITY_SELECTOR,

@@ -19,7 +19,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 
 from .const import CHARGE_TYPE_AC, CHARGE_TYPES, DOMAIN
-from .coordinator import EvChargeLogCoordinator
+from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
 from .models import Session, SessionInput, ValidationError
 from .storage import SessionNotFoundError
 
@@ -81,10 +81,10 @@ def _error(key: str, **placeholders: str) -> ServiceValidationError:
 
 
 def _coordinator(hass: HomeAssistant) -> EvChargeLogCoordinator:
-    entries = hass.config_entries.async_loaded_entries(DOMAIN)
-    if not entries:
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None:
         raise _error("not_loaded")
-    return entries[0].runtime_data
+    return coord
 
 
 def _subentry_of_device(

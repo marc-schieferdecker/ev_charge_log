@@ -2,11 +2,11 @@
   "config": {
     "step": {
       "user": {
-        "description": "EV Charge Log einrichten. Danach fügst du der Integration deine Fahrzeuge und Tarife hinzu."
+        "description": "EV Charge Log einrichten. Es werden zwei Einträge angelegt, „Fahrzeuge“ und „Ladetarife“. Dort fügst du deine Fahrzeuge und Tarife hinzu."
       }
     },
     "abort": {
-      "single_instance_allowed": "EV Charge Log ist bereits eingerichtet. Füge Fahrzeuge und Tarife dem vorhandenen Eintrag hinzu."
+      "already_configured": "EV Charge Log ist bereits eingerichtet. Füge Fahrzeuge und Tarife den vorhandenen Einträgen hinzu."
     }
   },
   "config_subentries": {

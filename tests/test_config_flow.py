@@ -1,56 +1,49 @@
-"""Tests for the config flow and the vehicle/tariff subentry flows."""
+"""Tests for the config flow, the entry migration and the subentry flows."""
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
 pytest.importorskip("pytest_homeassistant_custom_component")
 
-from homeassistant.config_entries import (
-    SOURCE_RECONFIGURE,
-    SOURCE_USER,
-    ConfigSubentryData,
-)
+from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType, InvalidData
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-)
+from homeassistant.data_entry_flow import FlowResultType, InvalidData, UnknownHandler
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ev_charge_log.const import DOMAIN
 
-
-def _tariff(title: str, price_ac: float, price_dc: float | None = None):
-    return ConfigSubentryData(
-        data={"price_ac": price_ac, "price_dc": price_dc},
-        subentry_type="tariff",
-        title=title,
-        unique_id=None,
-    )
+from .conftest import make_subentry, setup_entries
 
 
-def _vehicle(title: str, **data):
-    return ConfigSubentryData(
-        data={"battery_capacity_kwh": None, "default_tariff_id": None, **data},
-        subentry_type="vehicle",
-        title=title,
-        unique_id=None,
+@pytest.fixture
+async def entries(hass: HomeAssistant) -> tuple[MockConfigEntry, MockConfigEntry]:
+    """Vehicles entry with one vehicle, tariffs entry with one tariff."""
+    return await setup_entries(
+        hass,
+        [
+            make_subentry("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
+            make_subentry(
+                "vehicle",
+                "seal",
+                "Seal U",
+                battery_capacity_kwh=None,
+                default_tariff_id=None,
+            ),
+        ],
     )
 
 
 @pytest.fixture
-async def entry(hass: HomeAssistant) -> MockConfigEntry:
-    """A set-up entry with one tariff and one vehicle."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="EV Charge Log",
-        data={},
-        subentries_data=[_tariff("EnBW", 0.59, 0.69), _vehicle("Seal U")],
-    )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    return entry
+def vehicles(entries) -> MockConfigEntry:
+    return entries[0]
+
+
+@pytest.fixture
+def tariffs(entries) -> MockConfigEntry:
+    return entries[1]
 
 
 def _sub(entry: MockConfigEntry, title: str):
@@ -58,7 +51,7 @@ def _sub(entry: MockConfigEntry, title: str):
 
 
 async def _start(hass: HomeAssistant, entry, subentry_type: str, subentry_id=None):
-    context = {"source": SOURCE_USER}
+    context: dict[str, Any] = {"source": SOURCE_USER}
     if subentry_id is not None:
         context = {"source": SOURCE_RECONFIGURE, "subentry_id": subentry_id}
     return await hass.config_entries.subentries.async_init(
@@ -66,60 +59,156 @@ async def _start(hass: HomeAssistant, entry, subentry_type: str, subentry_id=Non
     )
 
 
-# --- main entry -----------------------------------------------------------
+# --- main entries -------------------------------------------------------------
 
 
-async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
+async def test_user_flow_creates_both_entries(hass: HomeAssistant) -> None:
+    hass.config.language = "de"
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "EV Charge Log"
+    await hass.async_block_till_done()
+
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert sorted((e.unique_id, e.title, e.data["kind"]) for e in entries) == [
+        ("tariffs", "Ladetarife", "tariffs"),
+        ("vehicles", "Fahrzeuge", "vehicles"),
+    ]
 
 
-async def test_only_one_entry_allowed(hass: HomeAssistant, entry) -> None:
+async def test_english_titles(hass: HomeAssistant) -> None:
+    hass.config.language = "en"
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    await hass.async_block_till_done()
+    titles = sorted(e.title for e in hass.config_entries.async_entries(DOMAIN))
+    assert titles == ["Tariffs", "Vehicles"]
+
+
+async def test_no_third_entry(hass: HomeAssistant, entries) -> None:
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "single_instance_allowed"
+    assert result["reason"] == "already_configured"
 
 
-# --- tariffs --------------------------------------------------------------
+async def test_missing_entry_is_recreated(hass: HomeAssistant, entries) -> None:
+    vehicles, tariffs = entries
+    assert await hass.config_entries.async_remove(tariffs.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_reload(vehicles.entry_id)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "tariffs")
 
 
-async def test_add_tariff(hass: HomeAssistant, entry) -> None:
-    result = await _start(hass, entry, "tariff")
+async def test_subentry_types_per_entry(hass: HomeAssistant, vehicles, tariffs) -> None:
+    with pytest.raises(UnknownHandler):
+        await _start(hass, vehicles, "tariff")
+    with pytest.raises(UnknownHandler):
+        await _start(hass, tariffs, "vehicle")
+
+
+# --- migration ----------------------------------------------------------------
+
+
+async def test_migrate_single_entry_to_two(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    hass.config.language = "de"
+    hass_storage["ev_charge_log.sessions"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": "ev_charge_log.sessions",
+        "data": {
+            "sessions": [
+                {
+                    "id": "s1",
+                    "vehicle_id": "seal",
+                    "timestamp": "2026-11-01T12:00:00+00:00",
+                    "energy_kwh": 40.0,
+                    "tariff_id": "enbw",
+                    "charge_type": "ac",
+                    "price_per_kwh": 0.59,
+                    "cost": 23.6,
+                    "cost_overridden": False,
+                    "source": "manual",
+                }
+            ]
+        },
+    }
+    old = MockConfigEntry(
+        domain=DOMAIN,
+        title="EV Charge Log",
+        data={},
+        version=1,
+        subentries_data=[
+            make_subentry("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
+            make_subentry("vehicle", "seal", "Seal U", default_tariff_id="enbw"),
+        ],
+    )
+    old.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(old.entry_id)
+    await hass.async_block_till_done()
+
+    assert old.version == 2
+    assert old.title == "Fahrzeuge"
+    assert old.unique_id == "vehicles"
+    assert old.data == {"kind": "vehicles"}
+    assert [s.subentry_id for s in old.subentries.values()] == ["seal"]
+
+    new = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "tariffs")
+    assert new is not None
+    assert new.title == "Ladetarife"
+    assert [s.subentry_id for s in new.subentries.values()] == ["enbw"]
+    assert dict(new.subentries["enbw"].data) == {"price_ac": 0.59, "price_dc": 0.69}
+
+    # The booked session survives and still finds its tariff and vehicle.
+    coord = old.runtime_data
+    assert [s.id for s in coord.log.sessions()] == ["s1"]
+    assert coord.tariffs["enbw"].name == "EnBW"
+    assert coord.inputs["seal"].tariff_id == "enbw"
+
+
+# --- tariffs ------------------------------------------------------------------
+
+
+async def test_add_tariff(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": " Ionity ", "price_ac": 0.69, "price_dc": 0.79}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    sub = _sub(entry, "Ionity")
+    sub = _sub(tariffs, "Ionity")
     assert dict(sub.data) == {"price_ac": 0.69, "price_dc": 0.79}
 
 
-async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, entry) -> None:
-    result = await _start(hass, entry, "tariff")
+async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Arbeitgeber", "price_ac": 0}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(_sub(entry, "Arbeitgeber").data) == {"price_ac": 0.0, "price_dc": None}
+    data = dict(_sub(tariffs, "Arbeitgeber").data)
+    assert data == {"price_ac": 0.0, "price_dc": None}
 
 
-async def test_negative_price_is_rejected(hass: HomeAssistant, entry) -> None:
-    result = await _start(hass, entry, "tariff")
+async def test_negative_price_is_rejected(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
     with pytest.raises(InvalidData):
         await hass.config_entries.subentries.async_configure(
             result["flow_id"], {"name": "Bad", "price_ac": -0.1}
         )
 
 
-async def test_duplicate_tariff_name_is_rejected(hass: HomeAssistant, entry) -> None:
-    result = await _start(hass, entry, "tariff")
+async def test_duplicate_tariff_name_is_rejected(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "enbw", "price_ac": 0.5}
     )
@@ -127,74 +216,77 @@ async def test_duplicate_tariff_name_is_rejected(hass: HomeAssistant, entry) -> 
     assert result["errors"] == {"name": "name_exists"}
 
 
-async def test_reconfigure_tariff(hass: HomeAssistant, entry) -> None:
-    enbw = _sub(entry, "EnBW")
-    result = await _start(hass, entry, "tariff", enbw.subentry_id)
+async def test_reconfigure_tariff(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff", "enbw")
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "EnBW", "price_ac": 0.62}
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    updated = entry.subentries[enbw.subentry_id]
-    assert dict(updated.data) == {"price_ac": 0.62, "price_dc": None}
+    assert dict(tariffs.subentries["enbw"].data) == {"price_ac": 0.62, "price_dc": None}
 
 
-# --- vehicles -------------------------------------------------------------
+# --- vehicles -----------------------------------------------------------------
 
 
-async def test_add_vehicle_with_default_tariff(hass: HomeAssistant, entry) -> None:
-    enbw = _sub(entry, "EnBW")
-    result = await _start(hass, entry, "vehicle")
+async def test_add_vehicle_with_default_tariff(hass: HomeAssistant, vehicles) -> None:
+    result = await _start(hass, vehicles, "vehicle")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"],
-        {
-            "name": "Dolphin",
-            "battery_capacity_kwh": 60.4,
-            "default_tariff_id": enbw.subentry_id,
-        },
+        {"name": "Dolphin", "battery_capacity_kwh": 60.4, "default_tariff_id": "enbw"},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(_sub(entry, "Dolphin").data) == {
+    assert dict(_sub(vehicles, "Dolphin").data) == {
         "battery_capacity_kwh": 60.4,
-        "default_tariff_id": enbw.subentry_id,
+        "default_tariff_id": "enbw",
     }
 
 
-async def test_add_vehicle_minimal(hass: HomeAssistant, entry) -> None:
-    result = await _start(hass, entry, "vehicle")
+async def test_vehicle_form_offers_tariffs_of_other_entry(
+    hass: HomeAssistant, vehicles
+) -> None:
+    result = await _start(hass, vehicles, "vehicle")
+    schema = result["data_schema"].schema
+    key = next(k for k in schema if k == "default_tariff_id")
+    options = schema[key].config["options"]
+    assert options == [{"value": "enbw", "label": "EnBW"}]
+
+
+async def test_add_vehicle_minimal(hass: HomeAssistant, vehicles) -> None:
+    result = await _start(hass, vehicles, "vehicle")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Dolphin"}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(_sub(entry, "Dolphin").data) == {
+    assert dict(_sub(vehicles, "Dolphin").data) == {
         "battery_capacity_kwh": None,
         "default_tariff_id": None,
     }
 
 
-async def test_blank_vehicle_name_is_rejected(hass: HomeAssistant, entry) -> None:
-    result = await _start(hass, entry, "vehicle")
+async def test_blank_vehicle_name_is_rejected(hass: HomeAssistant, vehicles) -> None:
+    result = await _start(hass, vehicles, "vehicle")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "   "}
     )
     assert result["errors"] == {"name": "name_required"}
 
 
-async def test_reconfigure_vehicle_keeps_own_name(hass: HomeAssistant, entry) -> None:
-    seal = _sub(entry, "Seal U")
-    result = await _start(hass, entry, "vehicle", seal.subentry_id)
+async def test_reconfigure_vehicle_keeps_own_name(
+    hass: HomeAssistant, vehicles
+) -> None:
+    result = await _start(hass, vehicles, "vehicle", "seal")
     result = await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Seal U", "battery_capacity_kwh": 87.0}
     )
     assert result["type"] is FlowResultType.ABORT
-    assert entry.subentries[seal.subentry_id].data["battery_capacity_kwh"] == 87.0
+    assert vehicles.subentries["seal"].data["battery_capacity_kwh"] == 87.0
 
 
-async def test_rename_vehicle(hass: HomeAssistant, entry) -> None:
-    seal = _sub(entry, "Seal U")
-    result = await _start(hass, entry, "vehicle", seal.subentry_id)
+async def test_rename_vehicle(hass: HomeAssistant, vehicles) -> None:
+    result = await _start(hass, vehicles, "vehicle", "seal")
     await hass.config_entries.subentries.async_configure(
         result["flow_id"], {"name": "Seal U AWD"}
     )
-    assert entry.subentries[seal.subentry_id].title == "Seal U AWD"
+    assert vehicles.subentries["seal"].title == "Seal U AWD"

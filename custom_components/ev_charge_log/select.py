@@ -27,17 +27,27 @@ async def async_setup_entry(
     coord = entry.runtime_data
     for vehicle_id in coord.vehicles:
         device = vehicle_device(coord, vehicle_id)
-        entities: list[SelectEntity] = [
-            ChargeTypeSelect(coord, vehicle_id, device, CHARGE_TYPE)
-        ]
-        # Without tariffs there is nothing to choose; booking then needs a cost.
-        if coord.tariffs:
-            entities.append(TariffSelect(coord, vehicle_id, device, TARIFF))
-        async_add_entities(entities, config_subentry_id=vehicle_id)
+        async_add_entities(
+            [
+                ChargeTypeSelect(coord, vehicle_id, device, CHARGE_TYPE),
+                TariffSelect(coord, vehicle_id, device, TARIFF),
+            ],
+            config_subentry_id=vehicle_id,
+        )
 
 
 class TariffSelect(EvChargeLogEntity, SelectEntity):
-    """Tariff for the next booking, preset with the vehicle's default."""
+    """Tariff for the next booking, preset with the vehicle's default.
+
+    Tariffs live in the other config entry and may load later or change at
+    any time; the options are read live. Without tariffs it is unavailable
+    and booking needs a cost.
+    """
+
+    @property
+    def available(self) -> bool:
+        """Only available when tariffs exist."""
+        return bool(self._coord.tariffs)
 
     @property
     def options(self) -> list[str]:

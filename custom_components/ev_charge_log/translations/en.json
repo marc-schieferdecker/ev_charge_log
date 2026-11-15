@@ -2,11 +2,11 @@
   "config": {
     "step": {
       "user": {
-        "description": "Set up EV Charge Log. Afterwards, add your vehicles and tariffs to the integration."
+        "description": "Set up EV Charge Log. Two entries are created, \"Vehicles\" and \"Tariffs\"; add your vehicles and tariffs there."
       }
     },
     "abort": {
-      "single_instance_allowed": "EV Charge Log is already set up. Add vehicles and tariffs to the existing entry."
+      "already_configured": "EV Charge Log is already set up. Add vehicles and tariffs to the existing entries."
     }
   },
   "config_subentries": {

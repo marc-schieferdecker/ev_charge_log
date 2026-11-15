@@ -9,55 +9,41 @@ import pytest
 
 pytest.importorskip("pytest_homeassistant_custom_component")
 
-from homeassistant.config_entries import ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-)
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ev_charge_log.const import DOMAIN
+
+from .conftest import make_subentry as _sub
+from .conftest import setup_entries
 
 T0 = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 
 
-def _sub(subentry_type: str, subentry_id: str, title: str, **data: Any):
-    return ConfigSubentryData(
-        data=data,
-        subentry_id=subentry_id,
-        subentry_type=subentry_type,
-        title=title,
-        unique_id=None,
-    )
-
-
 @pytest.fixture
 async def entry(hass: HomeAssistant) -> MockConfigEntry:
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="EV Charge Log",
-        data={},
-        subentries_data=[
+    """The vehicles entry (the tariffs entry is set up as well)."""
+    vehicles, _ = await setup_entries(
+        hass,
+        [
             _sub("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
             _sub("tariff", "free", "Arbeitgeber", price_ac=0.0, price_dc=None),
             _sub("vehicle", "seal", "Seal U", default_tariff_id="enbw"),
             _sub("vehicle", "dolphin", "Dolphin", default_tariff_id="free"),
         ],
     )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    return entry
+    return vehicles
 
 
 def _device(hass: HomeAssistant, subentry_id: str) -> str:
     registry = dr.async_get(hass)
-    entry_id = hass.config_entries.async_entries(DOMAIN)[0].entry_id
-    for device in dr.async_entries_for_config_entry(registry, entry_id):
-        if (DOMAIN, subentry_id) in device.identifiers:
-            return device.id
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
+            if (DOMAIN, subentry_id) in device.identifiers:
+                return device.id
     raise AssertionError(f"no device for {subentry_id}")
 
 
@@ -268,9 +254,15 @@ async def test_list_sessions_filtered(hass: HomeAssistant, entry) -> None:
     assert len(seal_late["sessions"]) == 1
 
 
-async def test_services_removed_on_unload(hass: HomeAssistant, entry) -> None:
+async def test_services_removed_when_both_entries_unloaded(
+    hass: HomeAssistant, entry
+) -> None:
     assert hass.services.has_service(DOMAIN, "add_session")
     assert await hass.config_entries.async_unload(entry.entry_id)
+    # Tariffs entry still loaded: actions stay (list_sessions still works).
+    assert hass.services.has_service(DOMAIN, "add_session")
+    tariffs = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, "tariffs")
+    assert await hass.config_entries.async_unload(tariffs.entry_id)
     assert not hass.services.has_service(DOMAIN, "add_session")
 
 

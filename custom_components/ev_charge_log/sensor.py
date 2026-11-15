@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import CONF_KIND, KIND_VEHICLES
 from .coordinator import EvChargeLogConfigEntry, EvChargeLogCoordinator
 from .entity import EvChargeLogEntity, tariff_device, vehicle_device
 from .models import Session, soc_metrics
@@ -205,12 +206,17 @@ async def async_setup_entry(
 ) -> None:
     """Create sensors for every vehicle and tariff subentry."""
     coord = entry.runtime_data
-    for vehicle_id in coord.vehicles:
-        device = vehicle_device(coord, vehicle_id)
-        async_add_entities(
-            [EvChargeLogSensor(coord, vehicle_id, device, d) for d in VEHICLE_SENSORS],
-            config_subentry_id=vehicle_id,
-        )
+    if entry.data[CONF_KIND] == KIND_VEHICLES:
+        for vehicle_id in coord.vehicles:
+            device = vehicle_device(coord, vehicle_id)
+            async_add_entities(
+                [
+                    EvChargeLogSensor(coord, vehicle_id, device, d)
+                    for d in VEHICLE_SENSORS
+                ],
+                config_subentry_id=vehicle_id,
+            )
+        return
     for tariff_id in coord.tariffs:
         device = tariff_device(coord, tariff_id)
         async_add_entities(
