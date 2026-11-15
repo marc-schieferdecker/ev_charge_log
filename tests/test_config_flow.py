@@ -29,6 +29,7 @@ NO_DETECTION = {
     "soc_entity_id": None,
     "location_entity_id": None,
     "reminder_excluded_zones": [],
+    "notify_services": [],
 }
 
 

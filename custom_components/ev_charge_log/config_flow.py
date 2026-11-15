@@ -35,6 +35,7 @@ from .const import (
     CONF_LOCATION_ENTITY_ID,
     CONF_MONTHLY_FEE,
     CONF_NAME,
+    CONF_NOTIFY_SERVICES,
     CONF_PRICE_AC,
     CONF_PRICE_DC,
     CONF_REMINDER_EXCLUDED_ZONES,
@@ -224,6 +225,15 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
             vol.Optional(CONF_LOCATION_ENTITY_ID): _LOCATION_SELECTOR,
             vol.Optional(CONF_REMINDER_EXCLUDED_ZONES): _ZONES_SELECTOR,
         }
+        phones = self._notify_options()
+        if phones:
+            fields[vol.Optional(CONF_NOTIFY_SERVICES)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=phones,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
         if tariffs:
             fields[vol.Optional(CONF_DEFAULT_TARIFF_ID)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -235,6 +245,20 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
                 )
             )
         return vol.Schema(fields)
+
+    def _notify_options(self) -> list[str]:
+        """Notify services of the Companion app ("mobile_app_..."), plus the
+        ones already chosen (so a phone that is gone can still be removed).
+        """
+        services = {
+            name
+            for name in self.hass.services.async_services_for_domain("notify")
+            if name.startswith("mobile_app_")
+        }
+        if self.source == SOURCE_RECONFIGURE:
+            current = self._get_reconfigure_subentry().data
+            services |= set(current.get(CONF_NOTIFY_SERVICES) or [])
+        return sorted(services)
 
     @staticmethod
     def _to_data(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +274,7 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
             CONF_REMINDER_EXCLUDED_ZONES: list(
                 user_input.get(CONF_REMINDER_EXCLUDED_ZONES) or []
             ),
+            CONF_NOTIFY_SERVICES: list(user_input.get(CONF_NOTIFY_SERVICES) or []),
         }
 
     async def async_step_user(

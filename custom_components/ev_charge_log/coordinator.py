@@ -27,6 +27,7 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -42,7 +43,9 @@ from .const import (
     CHARGE_TYPES,
     DOMAIN,
     EVENT_CHARGING_FINISHED,
+    EVENT_MOBILE_APP_ACTION,
     PANEL_URL_PATH,
+    PUSH_ACTION_PREFIX,
     SOURCE_REMINDER,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
@@ -55,7 +58,14 @@ from .detection import (
     booking_defaults,
     on_charging_state,
 )
-from .models import Session, SessionInput, Tariff, ValidationError, Vehicle
+from .models import (
+    Session,
+    SessionInput,
+    Tariff,
+    ValidationError,
+    Vehicle,
+    parse_energy,
+)
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,7 +86,7 @@ async def async_get_coordinator(hass: HomeAssistant) -> EvChargeLogCoordinator:
         if (coord := hass.data.get(COORDINATOR_KEY)) is None:
             coord = EvChargeLogCoordinator(hass)
             await coord.async_load()
-            coord.async_start_fee_timer()
+            coord.async_start()
             hass.data[COORDINATOR_KEY] = coord
     return coord
 
@@ -121,6 +131,7 @@ class EvChargeLogCoordinator:
             hass, STORAGE_VERSION, STORAGE_KEY, minor_version=STORAGE_MINOR_VERSION
         )
         self.log = SessionLog()
+        self._unsub_push_listener: CALLBACK_TYPE | None = None
         self.detection: dict[str, DetectionState] = {}
         self.vehicles: dict[str, Vehicle] = {}
         self.tariffs: dict[str, Tariff] = {}
@@ -208,20 +219,163 @@ class EvChargeLogCoordinator:
                 await self._async_commit()
 
     @callback
-    def async_start_fee_timer(self) -> None:
-        """Book fees shortly after midnight, when a new month may start."""
+    def async_start(self) -> None:
+        """Start the fee timer and listen to replies from the Companion app."""
         if self._unsub_fee_timer is None:
+            # Book fees shortly after midnight, when a new month may start.
             self._unsub_fee_timer = async_track_time_change(
                 self.hass, self.async_book_fees, hour=0, minute=0, second=30
+            )
+        if self._unsub_push_listener is None:
+            self._unsub_push_listener = self.hass.bus.async_listen(
+                EVENT_MOBILE_APP_ACTION, self._async_push_action
             )
 
     @callback
     def async_shutdown(self) -> None:
-        """Stop timers and state tracking (last entry unloaded)."""
+        """Stop timers, listeners and state tracking (last entry unloaded)."""
         self._async_stop_tracking()
-        if self._unsub_fee_timer is not None:
-            self._unsub_fee_timer()
-            self._unsub_fee_timer = None
+        for unsub in (self._unsub_fee_timer, self._unsub_push_listener):
+            if unsub is not None:
+                unsub()
+        self._unsub_fee_timer = None
+        self._unsub_push_listener = None
+
+    # --- push to phones (stage 4) -------------------------------------------
+
+    @staticmethod
+    def _push_tag(vehicle_id: str) -> str:
+        return f"{DOMAIN}_{vehicle_id}"
+
+    async def _async_text(self, key: str, **placeholders: Any) -> str:
+        """Translated message from the "exceptions" category."""
+        texts = await async_get_translations(
+            self.hass, self.hass.config.language, "exceptions", [DOMAIN]
+        )
+        text = texts.get(f"component.{DOMAIN}.exceptions.{key}.message", key)
+        return text.format(**placeholders)
+
+    async def _async_push(
+        self, vehicle: Vehicle, title: str, message: str, *, ask_kwh: bool
+    ) -> None:
+        """Send a notification to the vehicle's phones (Companion app).
+
+        With `ask_kwh` it has a text input for the kWh and a button that
+        opens the panel. The tag makes a new notification replace the old.
+        """
+        data: dict[str, Any] = {"tag": self._push_tag(vehicle.id)}
+        if ask_kwh:
+            data["actions"] = [
+                {
+                    "action": f"{PUSH_ACTION_PREFIX}{vehicle.id}",
+                    "title": await self._async_text("push_reply"),
+                    "behavior": "textInput",
+                },
+                {
+                    "action": "URI",
+                    "title": await self._async_text("push_open"),
+                    "uri": f"/{PANEL_URL_PATH}",
+                },
+            ]
+        await self._async_send(
+            vehicle, {"title": title, "message": message, "data": data}
+        )
+
+    async def _async_clear_push(self, vehicle: Vehicle) -> None:
+        """Remove the notification from the vehicle's phones."""
+        await self._async_send(
+            vehicle,
+            {
+                "message": "clear_notification",
+                "data": {"tag": self._push_tag(vehicle.id)},
+            },
+        )
+
+    async def _async_send(self, vehicle: Vehicle, payload: dict[str, Any]) -> None:
+        for service in vehicle.notify_services:
+            if not self.hass.services.has_service("notify", service):
+                _LOGGER.warning("Notify service notify.%s not found", service)
+                continue
+            try:
+                await self.hass.services.async_call(
+                    "notify", service, payload, blocking=True
+                )
+            except HomeAssistantError as err:
+                _LOGGER.warning("Sending to notify.%s failed: %s", service, err)
+
+    @callback
+    def _async_push_action(self, event: Event) -> None:
+        """A reply from a phone: book the typed kWh."""
+        action = str(event.data.get("action", ""))
+        if not action.startswith(PUSH_ACTION_PREFIX):
+            return
+        vehicle = self.vehicles.get(action.removeprefix(PUSH_ACTION_PREFIX))
+        if vehicle is None:
+            return
+        self.hass.async_create_task(
+            self._async_book_reply(vehicle, event.data.get("reply_text")),
+            f"{DOMAIN} reply {vehicle.id}",
+        )
+
+    async def _async_book_reply(self, vehicle: Vehicle, text: str | None) -> None:
+        """Book the detected charge with the typed kWh and confirm it.
+
+        Only a detected charge that is not booked yet can be booked this way,
+        so sending a reply twice never books twice.
+        """
+        detected = self.detection.get(vehicle.id)
+        if detected is None or detected.pending is None:
+            await self._async_push(
+                vehicle,
+                vehicle.name,
+                await self._async_text("push_already_booked"),
+                ask_kwh=False,
+            )
+            return
+        energy = parse_energy(text)
+        if energy is None:
+            await self._async_push(
+                vehicle,
+                vehicle.name,
+                await self._async_text("push_invalid", text=text or ""),
+                ask_kwh=True,
+            )
+            return
+        current = self.inputs.get(vehicle.id) or VehicleInput()
+        try:
+            session = await self.async_add_session(
+                SessionInput(
+                    vehicle_id=vehicle.id,
+                    energy_kwh=energy,
+                    charge_type=current.charge_type,
+                    timestamp=dt_util.now(),
+                    tariff_id=current.tariff_id,
+                ),
+                timestamp_given=False,
+                clear_push=False,
+            )
+        except ValidationError as err:
+            await self._async_push(
+                vehicle,
+                vehicle.name,
+                await self._async_text("push_failed", error=str(err)),
+                ask_kwh=True,
+            )
+            return
+        self.async_reset_input(vehicle.id)
+        tariff = self.tariffs.get(session.tariff_id) if session.tariff_id else None
+        await self._async_push(
+            vehicle,
+            vehicle.name,
+            await self._async_text(
+                "push_booked",
+                energy=f"{session.energy_kwh:g}",
+                cost=f"{session.cost:.2f}",
+                currency=self.hass.config.currency,
+                tariff=tariff.name if tariff else "-",
+            ),
+            ask_kwh=False,
+        )
 
     # --- charge detection (stage 2) -----------------------------------------
 
@@ -356,6 +510,13 @@ class EvChargeLogCoordinator:
             title=title.format(**placeholders),
             notification_id=self._notification_id(vehicle.id),
         )
+        if vehicle.notify_services:
+            await self._async_push(
+                vehicle,
+                title.format(**placeholders),
+                await self._async_text("push_message", **placeholders),
+                ask_kwh=True,
+            )
 
     @staticmethod
     def _notification_id(vehicle_id: str) -> str:
@@ -466,7 +627,11 @@ class EvChargeLogCoordinator:
     # --- changes ----------------------------------------------------------
 
     async def async_add_session(
-        self, data: SessionInput, *, timestamp_given: bool = True
+        self,
+        data: SessionInput,
+        *,
+        timestamp_given: bool = True,
+        clear_push: bool = True,
     ) -> Session:
         """Book a session, persist it and refresh entities.
 
@@ -500,6 +665,10 @@ class EvChargeLogCoordinator:
             persistent_notification.async_dismiss(
                 self.hass, self._notification_id(data.vehicle_id)
             )
+            if clear_push and vehicle.notify_services:
+                self.hass.async_create_task(
+                    self._async_clear_push(vehicle), f"{DOMAIN} clear push"
+                )
         await self._async_commit()
         return session
 

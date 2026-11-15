@@ -70,6 +70,10 @@ Assign to a vehicle:
   that is assigned to a tariff, that tariff is preselected.
 - **Zones without reminder** – e.g. your home zone, if you don't want to be
   reminded there.
+- **Notify phones** – phones with the Home Assistant Companion app. Each
+  vehicle can notify different phones. In the notification you can type
+  the kWh from the receipt and the session is booked right away with the
+  preselected tariff (built for Android; iOS may differ).
 
 `unavailable`/`unknown` states are ignored, and a restart of Home Assistant
 does not count as a new charge.

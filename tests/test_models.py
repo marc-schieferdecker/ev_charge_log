@@ -16,6 +16,7 @@ from custom_components.ev_charge_log.models import (
     ValidationError,
     build_session,
     calculate_cost,
+    parse_energy,
     round_money,
     soc_metrics,
     summarize,
@@ -498,3 +499,26 @@ def test_fee_tariff_from_dict() -> None:
     )
     assert tariff.fee_start == date(2026, 10, 1)
     assert tariff.fee_end is None
+
+
+# --- typed kWh reply (stage 4 push) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("12", 12.0),
+        ("12,4", 12.4),
+        ("12.4", 12.4),
+        (" 12,4 kWh ", 12.4),
+        ("40KWH", 40.0),
+        ("0", None),
+        ("", None),
+        ("zwölf", None),
+        ("12,4,5", None),
+        ("-3", None),
+        (None, None),
+    ],
+)
+def test_parse_energy(text: str | None, expected: float | None) -> None:
+    assert parse_energy(text) == expected

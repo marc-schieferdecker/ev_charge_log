@@ -26,7 +26,8 @@
             "charging_entity_id": "Charging status",
             "soc_entity_id": "State of charge (SoC)",
             "location_entity_id": "Location",
-            "reminder_excluded_zones": "Zones without reminder"
+            "reminder_excluded_zones": "Zones without reminder",
+            "notify_services": "Notify phones"
           },
           "data_description": {
             "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
@@ -34,7 +35,8 @@
             "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
             "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
             "location_entity_id": "Optional. Device tracker or person. Selects the tariff of the zone the charge ends in.",
-            "reminder_excluded_zones": "Optional. No reminder after charging in these zones."
+            "reminder_excluded_zones": "Optional. No reminder after charging in these zones.",
+            "notify_services": "Optional. Phones with the Home Assistant Companion app that get the reminder. You can type the kWh directly into the notification to book the session."
           }
         },
         "reconfigure": {
@@ -46,7 +48,8 @@
             "charging_entity_id": "Charging status",
             "soc_entity_id": "State of charge (SoC)",
             "location_entity_id": "Location",
-            "reminder_excluded_zones": "Zones without reminder"
+            "reminder_excluded_zones": "Zones without reminder",
+            "notify_services": "Notify phones"
           },
           "data_description": {
             "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
@@ -54,7 +57,8 @@
             "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
             "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
             "location_entity_id": "Optional. Device tracker or person. Selects the tariff of the zone the charge ends in.",
-            "reminder_excluded_zones": "Optional. No reminder after charging in these zones."
+            "reminder_excluded_zones": "Optional. No reminder after charging in these zones.",
+            "notify_services": "Optional. Phones with the Home Assistant Companion app that get the reminder. You can type the kWh directly into the notification to book the session."
           }
         }
       },
@@ -201,6 +205,13 @@
     }
   },
   "exceptions": {
+    "push_message": { "message": "Charging ended at {time}, SoC {soc_start} % → {soc_end} %, tariff: {tariff}. Enter the kWh from the receipt to book it." },
+    "push_reply": { "message": "Enter kWh" },
+    "push_open": { "message": "Open" },
+    "push_booked": { "message": "Booked: {energy} kWh, {cost} {currency} ({tariff})." },
+    "push_invalid": { "message": "\"{text}\" is not a valid amount of kWh. Please try again, e.g. 12.4" },
+    "push_failed": { "message": "Not booked: {error}. Please check the tariff in the app." },
+    "push_already_booked": { "message": "This charge has already been booked." },
     "panel_empty": { "message": "No vehicles yet. Add your vehicles and tariffs in the integration settings." },
     "panel_add": { "message": "Open EV Charge Log settings" },
     "panel_input": { "message": "Log a session" },

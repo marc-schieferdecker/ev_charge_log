@@ -57,6 +57,11 @@ ZONE_HOME: Final = "zone.home"
 # Sidebar panel (stage 4)
 PANEL_URL_PATH: Final = "ev-charge-log"
 
+# Push to phones via the Companion app (stage 4)
+CONF_NOTIFY_SERVICES: Final = "notify_services"
+EVENT_MOBILE_APP_ACTION: Final = "mobile_app_notification_action"
+PUSH_ACTION_PREFIX: Final = "EV_CHARGE_LOG_KWH_"
+
 # Fired when a detected charge ends (not in an excluded zone).
 EVENT_CHARGING_FINISHED: Final = "ev_charge_log_charging_finished"
 

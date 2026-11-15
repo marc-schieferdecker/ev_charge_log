@@ -5,6 +5,7 @@ This module must not import Home Assistant so it can be tested on its own.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -16,6 +17,17 @@ from .const import CHARGE_TYPE_DC, CHARGE_TYPES, SOURCE_MANUAL, SOURCES
 
 class ValidationError(ValueError):
     """Raised when input data violates the data model rules."""
+
+
+_ENERGY_TEXT = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(?:kwh)?\s*$", re.IGNORECASE)
+
+
+def parse_energy(text: str | None) -> float | None:
+    """kWh from a typed reply ("12,4", "12.4", "12 kWh"); None if invalid."""
+    if text is None or (match := _ENERGY_TEXT.match(text)) is None:
+        return None
+    value = float(match.group(1).replace(",", "."))
+    return value if value > 0 else None
 
 
 def round_money(value: float) -> float:
@@ -44,6 +56,8 @@ class Vehicle:
     charging_entity_id: str | None = None
     location_entity_id: str | None = None
     reminder_excluded_zones: tuple[str, ...] = ()
+    # Stage 4: notify services of the Companion app (e.g. "mobile_app_pixel")
+    notify_services: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate the vehicle."""
@@ -62,6 +76,7 @@ class Vehicle:
             charging_entity_id=data.get("charging_entity_id"),
             location_entity_id=data.get("location_entity_id"),
             reminder_excluded_zones=tuple(data.get("reminder_excluded_zones") or ()),
+            notify_services=tuple(data.get("notify_services") or ()),
         )
 
 
