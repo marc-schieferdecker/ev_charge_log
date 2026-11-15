@@ -63,8 +63,25 @@ TEXT_KEYS = (
     "panel_chart_title",
     "panel_chart_energy",
     "panel_chart_cost",
+    "panel_sessions",
+    "panel_no_sessions",
+    "panel_more",
+    "panel_edit_title",
+    "panel_field_date",
+    "panel_field_energy",
+    "panel_field_charge_type",
+    "panel_field_tariff",
+    "panel_field_cost",
+    "panel_field_cost_hint",
+    "panel_field_note",
+    "panel_no_tariff",
+    "panel_save",
+    "panel_delete",
+    "panel_delete_confirm",
+    "panel_cancel",
 )
 HISTORY_DAYS = 30
+SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
 WATCH_ENTITIES = (
     ("sensor", "session_count"),
@@ -180,20 +197,59 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
             "total_cost": totals.total_cost,
         }
 
+    def device_of(platform: str, unique_id: str) -> str | None:
+        """Device ID via one of the subentry's entities (for the actions)."""
+        entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
+        entry = registry.async_get(entity_id) if entity_id else None
+        return entry.device_id if entry else None
+
+    def sessions(vehicle_id: str) -> list[dict[str, Any]]:
+        """Newest sessions first, for the list with edit dialog."""
+        newest = list(reversed(coord.log.sessions(vehicle_id=vehicle_id)))
+        rows = []
+        for session in newest[:SESSION_LIST_LIMIT]:
+            tariff = coord.tariffs.get(session.tariff_id) if session.tariff_id else None
+            rows.append(
+                {
+                    "id": session.id,
+                    # Local time; the dialog keeps the time when the date changes.
+                    "timestamp": dt_util.as_local(session.timestamp).isoformat(),
+                    "energy_kwh": session.energy_kwh,
+                    "charge_type": session.charge_type,
+                    "tariff_id": session.tariff_id,
+                    "tariff_name": tariff.name if tariff else None,
+                    "cost": session.cost,
+                    "cost_overridden": session.cost_overridden,
+                    "note": session.note,
+                }
+            )
+        return rows
+
     vehicles = []
+    tariffs = []
     if coord is not None:
         for vehicle in sorted(coord.vehicles.values(), key=lambda v: v.name.casefold()):
             vehicles.append(
                 {
                     "id": vehicle.id,
                     "name": vehicle.name,
+                    "device_id": device_of("button", f"{vehicle.id}_book"),
                     "input": entities(vehicle.id, INPUT_ENTITIES),
                     "stats": entities(vehicle.id, STAT_ENTITIES),
                     "history": history(vehicle.id),
+                    "sessions": sessions(vehicle.id),
                     # The panel redraws the chart when one of these changes.
                     "watch": [
                         row["entity"] for row in entities(vehicle.id, WATCH_ENTITIES)
                     ],
+                }
+            )
+        for tariff_id in coord.sorted_tariffs():
+            tariffs.append(
+                {
+                    "id": tariff_id,
+                    "name": coord.tariffs[tariff_id].name,
+                    "device_id": device_of("sensor", f"{tariff_id}_total_cost"),
                 }
             )
 
@@ -201,6 +257,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
     texts = {key: panel_texts.get(f"{prefix}.{key}.message", key) for key in TEXT_KEYS}
     return {
         "vehicles": vehicles,
+        "tariffs": tariffs,
         "config_url": f"/config/integrations/integration/{DOMAIN}",
         "texts": texts,
         "currency": hass.config.currency,

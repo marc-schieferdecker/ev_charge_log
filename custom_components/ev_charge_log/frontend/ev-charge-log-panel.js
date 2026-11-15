@@ -81,6 +81,134 @@ const STYLE = `
     color: var(--secondary-text-color);
     margin-top: 2px;
   }
+  .list-card {
+    padding: 16px 0 8px;
+  }
+  .list-title {
+    font-size: 16px;
+    font-weight: 500;
+    padding: 0 16px 8px;
+  }
+  .list-empty {
+    padding: 0 16px 8px;
+    color: var(--secondary-text-color);
+  }
+  button.session {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 8px 16px;
+    border: none;
+    border-top: 1px solid var(--divider-color);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  button.session:hover {
+    background: var(--secondary-background-color);
+  }
+  .session-date {
+    font-weight: 500;
+  }
+  .session-sub {
+    font-size: 13px;
+    color: var(--secondary-text-color);
+  }
+  .session-values {
+    text-align: right;
+  }
+  button.more {
+    display: block;
+    margin: 8px auto 0;
+    border: none;
+    background: none;
+    color: var(--primary-color);
+    font: inherit;
+    cursor: pointer;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    padding: 16px;
+  }
+  .dialog {
+    background: var(--card-background-color, var(--primary-background-color));
+    color: var(--primary-text-color);
+    border-radius: var(--ha-card-border-radius, 12px);
+    padding: 20px;
+    width: 100%;
+    max-width: 420px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  .dialog h2 {
+    margin: 0 0 16px;
+    font-size: 20px;
+    font-weight: 500;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  .field small {
+    color: var(--secondary-text-color);
+  }
+  .field input,
+  .field select {
+    font: inherit;
+    padding: 8px;
+    border: 1px solid var(--divider-color);
+    border-radius: 6px;
+    background: var(--secondary-background-color);
+    color: var(--primary-text-color);
+  }
+  .dialog-error {
+    color: var(--error-color);
+    min-height: 1em;
+    margin-bottom: 8px;
+  }
+  .buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .buttons .spacer {
+    flex: 1;
+  }
+  .buttons button {
+    font: inherit;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--divider-color);
+    background: none;
+    color: var(--primary-text-color);
+    cursor: pointer;
+  }
+  .buttons button.primary {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+  }
+  .buttons button.danger {
+    color: var(--error-color);
+    border-color: var(--error-color);
+  }
+  .buttons button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .empty {
     padding: 16px;
   }
@@ -94,6 +222,7 @@ const STYLE = `
 `;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const DOMAIN = "ev_charge_log";
 
 class EvChargeLogPanel extends HTMLElement {
   constructor() {
@@ -101,6 +230,9 @@ class EvChargeLogPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._cards = [];
     this._charts = new Map(); // vehicle id -> chart card element
+    this._lists = new Map(); // vehicle id -> session list card element
+    this._shown = new Map(); // vehicle id -> number of sessions shown
+    this._data = null;
     this._watch = [];
     this._watchSignature = "";
     this._loading = false;
@@ -155,24 +287,27 @@ class EvChargeLogPanel extends HTMLElement {
   }
 
   _checkForChanges() {
-    // Redraw the charts after a booking, correction or deletion.
+    // Redraw charts and lists after a booking, correction or deletion.
     if (!this._watch.length || this._loading) return;
     const signature = this._signature();
     if (signature === this._watchSignature) return;
     this._watchSignature = signature;
-    this._refreshCharts();
+    this._refreshData();
   }
 
-  async _refreshCharts() {
+  async _refreshData() {
     try {
       const data = await this._fetch();
+      this._data = data;
       for (const vehicle of data.vehicles) {
-        const card = this._charts.get(vehicle.id);
-        if (card) this._fillChartCard(card, vehicle, data);
+        const chart = this._charts.get(vehicle.id);
+        if (chart) this._fillChartCard(chart, vehicle, data);
+        const list = this._lists.get(vehicle.id);
+        if (list) this._fillSessionList(list, vehicle, data);
       }
     } catch (err) {
-      // Keep the old charts; a full reload happens when the panel reopens.
-      console.warn("EV Charge Log: chart refresh failed", err);
+      // Keep the old view; a full reload happens when the panel reopens.
+      console.warn("EV Charge Log: refresh failed", err);
     }
   }
 
@@ -206,6 +341,8 @@ class EvChargeLogPanel extends HTMLElement {
     const content = this._renderFrame();
     this._cards = [];
     this._charts = new Map();
+    this._lists = new Map();
+    this._data = data;
     this._watch = data.vehicles.flatMap((v) => v.watch || []);
     this._watchSignature = this._signature();
 
@@ -253,9 +390,263 @@ class EvChargeLogPanel extends HTMLElement {
       card.hass = this._hass;
       this._cards.push(card);
 
-      column.append(chart, card);
+      const list = document.createElement("ha-card");
+      this._fillSessionList(list, vehicle, data);
+      this._lists.set(vehicle.id, list);
+
+      column.append(chart, card, list);
       content.appendChild(column);
     }
+  }
+
+  // --- session list and edit dialog ---------------------------------------------
+
+  _fillSessionList(card, vehicle, data) {
+    const texts = data.texts;
+    const shown = this._shown.get(vehicle.id) || 10;
+    card.innerHTML = "";
+    const body = document.createElement("div");
+    body.className = "list-card";
+
+    const title = document.createElement("div");
+    title.className = "list-title";
+    title.textContent = `${vehicle.name} · ${texts.panel_sessions}`;
+    body.appendChild(title);
+
+    if (!vehicle.sessions.length) {
+      const empty = document.createElement("div");
+      empty.className = "list-empty";
+      empty.textContent = texts.panel_no_sessions;
+      body.appendChild(empty);
+    }
+
+    for (const session of vehicle.sessions.slice(0, shown)) {
+      const row = document.createElement("button");
+      row.className = "session";
+      row.type = "button";
+      const left = document.createElement("div");
+      const date = document.createElement("div");
+      date.className = "session-date";
+      date.textContent = this._date(session.timestamp.slice(0, 10));
+      const tariff = document.createElement("div");
+      tariff.className = "session-sub";
+      tariff.textContent = [
+        session.tariff_name || texts.panel_no_tariff,
+        session.charge_type.toUpperCase(),
+      ].join(" · ");
+      left.append(date, tariff);
+      const right = document.createElement("div");
+      right.className = "session-values";
+      const energy = document.createElement("div");
+      energy.textContent = `${this._number(session.energy_kwh, 2)} kWh`;
+      const cost = document.createElement("div");
+      cost.className = "session-sub";
+      cost.textContent = this._money(session.cost, data.currency);
+      right.append(energy, cost);
+      row.append(left, right);
+      row.addEventListener("click", () => this._openDialog(vehicle, session));
+      body.appendChild(row);
+    }
+
+    if (vehicle.sessions.length > shown) {
+      const more = document.createElement("button");
+      more.className = "more";
+      more.type = "button";
+      more.textContent = texts.panel_more;
+      more.addEventListener("click", () => {
+        this._shown.set(vehicle.id, shown + 10);
+        this._fillSessionList(card, vehicle, this._data || data);
+      });
+      body.appendChild(more);
+    }
+    card.appendChild(body);
+  }
+
+  _field(label, input, hint) {
+    const wrapper = document.createElement("label");
+    wrapper.className = "field";
+    const caption = document.createElement("span");
+    caption.textContent = label;
+    wrapper.append(caption, input);
+    if (hint) {
+      const small = document.createElement("small");
+      small.textContent = hint;
+      wrapper.appendChild(small);
+    }
+    return wrapper;
+  }
+
+  _openDialog(vehicle, session) {
+    const data = this._data;
+    const texts = data.texts;
+    const root = this.shadowRoot;
+    const day = session.timestamp.slice(0, 10);
+    const time = session.timestamp.slice(11, 19);
+
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "dialog";
+    overlay.appendChild(dialog);
+    const close = () => overlay.remove();
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) close();
+    });
+
+    const heading = document.createElement("h2");
+    heading.textContent = `${texts.panel_edit_title} · ${vehicle.name}`;
+    dialog.appendChild(heading);
+
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.value = day;
+
+    const energyInput = document.createElement("input");
+    energyInput.type = "text";
+    energyInput.inputMode = "decimal";
+    energyInput.value = String(session.energy_kwh);
+
+    const chargeType = document.createElement("select");
+    for (const value of ["ac", "dc"]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value.toUpperCase();
+      chargeType.appendChild(option);
+    }
+    chargeType.value = session.charge_type;
+
+    // A tariff can be changed but not removed (update_session has no
+    // "no tariff"); "no tariff" is only offered if the session has none.
+    const tariff = document.createElement("select");
+    if (!session.tariff_id) {
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = texts.panel_no_tariff;
+      tariff.appendChild(none);
+    }
+    for (const t of data.tariffs) {
+      const option = document.createElement("option");
+      option.value = t.id;
+      option.textContent = t.name;
+      tariff.appendChild(option);
+    }
+    tariff.value = session.tariff_id || "";
+
+    const costInput = document.createElement("input");
+    costInput.type = "text";
+    costInput.inputMode = "decimal";
+    costInput.value = session.cost_overridden ? String(session.cost) : "";
+    costInput.placeholder = this._money(session.cost, data.currency);
+
+    const noteInput = document.createElement("input");
+    noteInput.type = "text";
+    noteInput.value = session.note || "";
+
+    dialog.append(
+      this._field(texts.panel_field_date, dateInput),
+      this._field(texts.panel_field_energy, energyInput),
+      this._field(texts.panel_field_charge_type, chargeType),
+      this._field(texts.panel_field_tariff, tariff),
+      this._field(
+        `${texts.panel_field_cost} (${data.currency})`,
+        costInput,
+        texts.panel_field_cost_hint
+      ),
+      this._field(texts.panel_field_note, noteInput)
+    );
+
+    const error = document.createElement("div");
+    error.className = "dialog-error";
+    dialog.appendChild(error);
+
+    const buttons = document.createElement("div");
+    buttons.className = "buttons";
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "danger";
+    deleteButton.textContent = texts.panel_delete;
+    const spacer = document.createElement("span");
+    spacer.className = "spacer";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = texts.panel_cancel;
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "primary";
+    saveButton.textContent = texts.panel_save;
+    buttons.append(deleteButton, spacer, cancelButton, saveButton);
+    dialog.appendChild(buttons);
+
+    const run = async (service, serviceData) => {
+      error.textContent = "";
+      for (const b of [deleteButton, cancelButton, saveButton]) b.disabled = true;
+      try {
+        await this._hass.callService(DOMAIN, service, serviceData, undefined, false);
+        close();
+        await this._refreshData();
+      } catch (err) {
+        error.textContent = (err && err.message) || String(err);
+      } finally {
+        for (const b of [deleteButton, cancelButton, saveButton]) b.disabled = false;
+      }
+    };
+
+    cancelButton.addEventListener("click", close);
+    deleteButton.addEventListener("click", () => {
+      if (!window.confirm(texts.panel_delete_confirm)) return;
+      run("delete_session", { vehicle: vehicle.device_id, session_id: session.id });
+    });
+    saveButton.addEventListener("click", () => {
+      const changes = {};
+      if (dateInput.value && dateInput.value !== day) {
+        // Keep the time of day; a time without offset is HA local time.
+        changes.timestamp = `${dateInput.value}T${time}`;
+      }
+      const energy = this._parse(energyInput.value);
+      if (energy === null || energy <= 0) {
+        error.textContent = `${texts.panel_field_energy}: ${energyInput.value}`;
+        return;
+      }
+      if (energy !== session.energy_kwh) changes.energy_kwh = energy;
+      if (chargeType.value !== session.charge_type) {
+        changes.charge_type = chargeType.value;
+      }
+      if (tariff.value && tariff.value !== (session.tariff_id || "")) {
+        const chosen = data.tariffs.find((t) => t.id === tariff.value);
+        changes.tariff = chosen.device_id;
+      }
+      const costText = costInput.value.trim();
+      if (costText === "") {
+        if (session.cost_overridden) changes.clear_cost = true;
+      } else {
+        const cost = this._parse(costText);
+        if (cost === null || cost < 0) {
+          error.textContent = `${texts.panel_field_cost}: ${costText}`;
+          return;
+        }
+        if (!session.cost_overridden || cost !== session.cost) changes.cost = cost;
+      }
+      if (noteInput.value !== (session.note || "")) changes.note = noteInput.value;
+
+      if (!Object.keys(changes).length) {
+        close();
+        return;
+      }
+      run("update_session", {
+        vehicle: vehicle.device_id,
+        session_id: session.id,
+        ...changes,
+      });
+    });
+
+    root.appendChild(overlay);
+    energyInput.focus();
+  }
+
+  _parse(text) {
+    const normalized = String(text).trim().replace(",", ".");
+    if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+    return Number(normalized);
   }
 
   _fillChartCard(card, vehicle, data) {

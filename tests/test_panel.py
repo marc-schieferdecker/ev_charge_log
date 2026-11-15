@@ -198,3 +198,70 @@ async def test_panel_history_last_30_days(hass: HomeAssistant, freezer) -> None:
 
     dolphin = next(v for v in result["vehicles"] if v["id"] == "dolphin")
     assert dolphin["history"]["total_energy"] == 0
+
+
+async def test_panel_lists_sessions_newest_first(hass: HomeAssistant) -> None:
+    from datetime import datetime
+
+    from custom_components.ev_charge_log.models import SessionInput
+
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    tz = dt_util.get_default_time_zone()
+    for day in range(1, 13):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id="seal",
+                energy_kwh=float(day),
+                charge_type="ac",
+                timestamp=datetime(2026, 11, day, 18, 30, tzinfo=tz),
+                tariff_id="enbw",
+                cost=1.5 if day == 12 else None,
+                note="A7" if day == 12 else None,
+            )
+        )
+
+    result = await async_panel_data(hass)
+    seal = next(v for v in result["vehicles"] if v["id"] == "seal")
+    assert seal["device_id"]
+    assert len(seal["sessions"]) == 12
+    newest = seal["sessions"][0]
+    assert newest["timestamp"] == "2026-11-12T18:30:00+01:00"
+    assert newest["energy_kwh"] == 12.0
+    assert newest["tariff_id"] == "enbw"
+    assert newest["tariff_name"] == "EnBW"
+    assert newest["cost"] == 1.5
+    assert newest["cost_overridden"] is True
+    assert newest["note"] == "A7"
+    assert seal["sessions"][-1]["energy_kwh"] == 1.0
+
+    assert result["tariffs"] == [
+        {"id": "enbw", "name": "EnBW", "device_id": result["tariffs"][0]["device_id"]}
+    ]
+    assert result["tariffs"][0]["device_id"]
+    assert result["texts"]["panel_save"] == "Save"
+
+
+async def test_panel_list_is_limited(hass: HomeAssistant) -> None:
+    from datetime import datetime, timedelta
+
+    from custom_components.ev_charge_log.models import SessionInput
+    from custom_components.ev_charge_log.panel import SESSION_LIST_LIMIT
+
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    start = datetime(2026, 1, 1, tzinfo=dt_util.get_default_time_zone())
+    for i in range(SESSION_LIST_LIMIT + 5):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id="dolphin",
+                energy_kwh=1.0,
+                charge_type="ac",
+                timestamp=start + timedelta(hours=i),
+                cost=0,
+            )
+        )
+    result = await async_panel_data(hass)
+    dolphin = next(v for v in result["vehicles"] if v["id"] == "dolphin")
+    assert len(dolphin["sessions"]) == SESSION_LIST_LIMIT
