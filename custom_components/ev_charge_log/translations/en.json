@@ -184,6 +184,13 @@
     "panel_add": { "message": "Open EV Charge Log settings" },
     "panel_input": { "message": "Log a session" },
     "panel_stats": { "message": "Statistics" },
+    "panel_label_input_date": { "message": "Date (optional)" },
+    "panel_label_input_energy": { "message": "Energy" },
+    "panel_label_input_cost": { "message": "Cost (optional)" },
+    "panel_label_input_tariff": { "message": "Tariff" },
+    "panel_label_input_charge_type": { "message": "Charge type" },
+    "panel_label_book": { "message": "Book session" },
+    "panel_label_reset_input": { "message": "Reset input" },
     "reminder_title": { "message": "{vehicle} has finished charging" },
     "reminder_message": {
       "message": "Charging ended at {time}. SoC {soc_start} % → {soc_end} %, tariff: {tariff}.\n\n[Log the session]({url}) – enter the energy from the receipt and press \"Book session\"."

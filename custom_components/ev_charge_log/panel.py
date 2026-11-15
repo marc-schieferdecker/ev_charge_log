@@ -111,16 +111,37 @@ async def websocket_panel(
 
 
 async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
-    """Data for the panel (also used by the tests)."""
+    """Data for the panel (also used by the tests).
+
+    Each row has the entity ID and a short name without the vehicle name
+    (the card title already shows it): input rows use the `panel_label_*`
+    texts, statistic rows the translated entity name.
+    """
     registry = er.async_get(hass)
     coord = hass.data.get(COORDINATOR_KEY)
+    language = hass.config.language
+    panel_texts = await async_get_translations(hass, language, "exceptions", [DOMAIN])
+    entity_texts = await async_get_translations(hass, language, "entity", [DOMAIN])
 
-    def entities(vehicle_id: str, spec: tuple[tuple[str, str], ...]) -> list[str]:
-        found = (
-            registry.async_get_entity_id(platform, DOMAIN, f"{vehicle_id}_{key}")
-            for platform, key in spec
+    def label(platform: str, key: str) -> str | None:
+        short = panel_texts.get(
+            f"component.{DOMAIN}.exceptions.panel_label_{key}.message"
         )
-        return [entity_id for entity_id in found if entity_id]
+        return short or entity_texts.get(
+            f"component.{DOMAIN}.entity.{platform}.{key}.name"
+        )
+
+    def entities(
+        vehicle_id: str, spec: tuple[tuple[str, str], ...]
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for platform, key in spec:
+            entity_id = registry.async_get_entity_id(
+                platform, DOMAIN, f"{vehicle_id}_{key}"
+            )
+            if entity_id:
+                rows.append({"entity": entity_id, "name": label(platform, key)})
+        return rows
 
     vehicles = []
     if coord is not None:
@@ -134,11 +155,8 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                 }
             )
 
-    translations = await async_get_translations(
-        hass, hass.config.language, "exceptions", [DOMAIN]
-    )
     prefix = f"component.{DOMAIN}.exceptions"
-    texts = {key: translations.get(f"{prefix}.{key}.message", key) for key in TEXT_KEYS}
+    texts = {key: panel_texts.get(f"{prefix}.{key}.message", key) for key in TEXT_KEYS}
     return {
         "vehicles": vehicles,
         "config_url": f"/config/integrations/integration/{DOMAIN}",

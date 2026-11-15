@@ -184,6 +184,13 @@
     "panel_add": { "message": "Einstellungen von EV Charge Log öffnen" },
     "panel_input": { "message": "Ladung eintragen" },
     "panel_stats": { "message": "Statistik" },
+    "panel_label_input_date": { "message": "Datum (optional)" },
+    "panel_label_input_energy": { "message": "Energie" },
+    "panel_label_input_cost": { "message": "Betrag (optional)" },
+    "panel_label_input_tariff": { "message": "Tarif" },
+    "panel_label_input_charge_type": { "message": "Ladeart" },
+    "panel_label_book": { "message": "Ladung buchen" },
+    "panel_label_reset_input": { "message": "Eingabe zurücksetzen" },
     "reminder_title": { "message": "{vehicle} hat fertig geladen" },
     "reminder_message": {
       "message": "Ladung beendet um {time}. SoC {soc_start} % → {soc_end} %, Tarif: {tariff}.\n\n[Ladung eintragen]({url}) – Energie vom Beleg eingeben und „Ladung buchen“ drücken."

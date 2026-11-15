@@ -24,7 +24,8 @@ const STYLE = `
   }
   .content {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    /* Wide cards on a PC, one full-width card on a phone. */
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
     gap: 16px;
     padding: 16px;
     align-items: start;
@@ -133,15 +134,17 @@ class EvChargeLogPanel extends HTMLElement {
     }
 
     content.className = "content";
+    // Short row names; without a name the entity's own name is used.
+    const row = (r) => (r.name ? { entity: r.entity, name: r.name } : r.entity);
     for (const vehicle of data.vehicles) {
       const card = helpers.createCardElement({
         type: "entities",
         title: vehicle.name,
         entities: [
           { type: "section", label: data.texts.panel_input },
-          ...vehicle.input,
+          ...vehicle.input.map(row),
           { type: "section", label: data.texts.panel_stats },
-          ...vehicle.stats,
+          ...vehicle.stats.map(row),
         ],
       });
       card.hass = this._hass;

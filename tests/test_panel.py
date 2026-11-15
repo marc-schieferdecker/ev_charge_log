@@ -66,10 +66,23 @@ async def test_panel_websocket_lists_vehicles(
     assert [v["name"] for v in result["vehicles"]] == ["Dolphin", "Seal U"]
     seal = result["vehicles"][1]
     assert seal["id"] == "seal"
-    assert len(seal["input"]) == 7
-    assert seal["input"][0].startswith("date.")
-    assert seal["input"][-2:] == [e for e in seal["input"] if e.startswith("button.")]
-    assert seal["stats"][0].startswith("sensor.")
+    inputs = [row["entity"] for row in seal["input"]]
+    assert len(inputs) == 7
+    assert inputs[0].startswith("date.")
+    assert inputs[-2:] == [e for e in inputs if e.startswith("button.")]
+    # Short names without the vehicle name.
+    assert [row["name"] for row in seal["input"]] == [
+        "Datum (optional)",
+        "Energie",
+        "Betrag (optional)",
+        "Tarif",
+        "Ladeart",
+        "Ladung buchen",
+        "Eingabe zurücksetzen",
+    ]
+    assert seal["stats"][0]["entity"].startswith("sensor.")
+    assert seal["stats"][0]["name"] == "Gesamtkosten"
+    assert seal["stats"][4]["name"] == "Letzte Ladung"
     assert len(seal["stats"]) == 8
     assert result["config_url"] == "/config/integrations/integration/ev_charge_log"
     assert result["texts"]["panel_input"] == "Ladung eintragen"
