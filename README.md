@@ -109,9 +109,11 @@ you enter by hand always win.
 
 ### Dashboard
 
-EV Charge Log adds a **Charging log** page to the sidebar with one card per
-vehicle: the input fields to log a session and the vehicle's statistics.
-Without vehicles it links to the integration settings.
+EV Charge Log adds a **Charging log** page to the sidebar. Per vehicle it
+shows a chart of the last 30 days (energy and cost per charging day,
+without monthly fees) and a card with the input fields to log a session and
+the vehicle's statistics. Without vehicles it links to the integration
+settings.
 
 You can also use the entities on your own dashboards. Every vehicle gets
 input entities to book a session:

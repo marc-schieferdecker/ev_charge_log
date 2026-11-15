@@ -16,6 +16,7 @@ from custom_components.ev_charge_log.models import (
     ValidationError,
     build_session,
     calculate_cost,
+    daily_totals,
     parse_energy,
     round_money,
     soc_metrics,
@@ -522,3 +523,43 @@ def test_fee_tariff_from_dict() -> None:
 )
 def test_parse_energy(text: str | None, expected: float | None) -> None:
     assert parse_energy(text) == expected
+
+
+# --- daily totals for the panel chart -------------------------------------
+
+
+def test_daily_totals_last_30_days() -> None:
+    def at(day: int, kwh: float, hour: int = 12) -> Session:
+        return build_session(
+            f"s{day}{hour}",
+            _input(
+                energy_kwh=kwh,
+                tariff_id="enbw",
+                timestamp=datetime(2026, 11, day, hour, tzinfo=UTC),
+            ),
+            ENBW,
+        )
+
+    sessions = [
+        at(1, 10.0),  # 15 days before the last day -> inside
+        at(15, 20.0, 8),
+        at(15, 5.0, 20),  # two sessions on one day
+        at(16, 99.0),  # after the last day -> outside
+    ]
+    totals = daily_totals(
+        sessions, date(2026, 11, 15), 30, lambda s: s.timestamp.date()
+    )
+    assert len(totals.days) == 30
+    assert totals.days[0] == date(2026, 10, 17)
+    assert totals.days[-1] == date(2026, 11, 15)
+    assert totals.energy_kwh[-1] == 25.0
+    assert totals.cost[-1] == 14.75
+    assert totals.energy_kwh[totals.days.index(date(2026, 11, 1))] == 10.0
+    assert totals.total_energy_kwh == 35.0
+    assert totals.total_cost == 20.65
+
+
+def test_daily_totals_without_sessions() -> None:
+    totals = daily_totals([], date(2026, 11, 15), 7, lambda s: s.timestamp.date())
+    assert totals.energy_kwh == [0.0] * 7
+    assert totals.total_cost == 0

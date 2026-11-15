@@ -6,9 +6,9 @@ This module must not import Home Assistant so it can be tested on its own.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -441,6 +441,52 @@ def summarize(sessions: Iterable[Session], fees: Iterable[Fee] = ()) -> Summary:
         count += 1
     fee_total = sum((Decimal(str(fee.amount)) for fee in fees), Decimal(0))
     return Summary(float(cost + fee_total), float(energy), count, float(fee_total))
+
+
+@dataclass(frozen=True, slots=True)
+class DailyTotals:
+    """Energy and session cost per day (fees are not included)."""
+
+    days: list[date]
+    energy_kwh: list[float]
+    cost: list[float]
+
+    @property
+    def total_energy_kwh(self) -> float:
+        """Sum over all days."""
+        return float(sum(Decimal(str(v)) for v in self.energy_kwh))
+
+    @property
+    def total_cost(self) -> float:
+        """Sum over all days."""
+        return float(sum(Decimal(str(v)) for v in self.cost))
+
+
+def daily_totals(
+    sessions: Iterable[Session],
+    last_day: date,
+    days: int,
+    day_of: Callable[[Session], date],
+) -> DailyTotals:
+    """Totals per day for `days` days up to `last_day` (inclusive).
+
+    `day_of` gives the (local) day of a session. Monthly fees are not part
+    of this: they belong to a month, not to a charging day.
+    """
+    first_day = last_day - timedelta(days=days - 1)
+    span = [first_day + timedelta(days=i) for i in range(days)]
+    energy = {day: Decimal(0) for day in span}
+    cost = {day: Decimal(0) for day in span}
+    for session in sessions:
+        day = day_of(session)
+        if day in energy:
+            energy[day] += Decimal(str(session.energy_kwh))
+            cost[day] += Decimal(str(session.cost))
+    return DailyTotals(
+        days=span,
+        energy_kwh=[float(energy[d]) for d in span],
+        cost=[float(cost[d]) for d in span],
+    )
 
 
 @dataclass(frozen=True, slots=True)

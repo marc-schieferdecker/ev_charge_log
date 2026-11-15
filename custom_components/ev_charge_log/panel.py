@@ -18,10 +18,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.loader import async_get_integration
+from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
 
 from .const import DOMAIN, PANEL_URL_PATH
 from .coordinator import COORDINATOR_KEY
+from .models import daily_totals
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +55,23 @@ STAT_ENTITIES = (
     ("sensor", "last_session_energy"),
     ("sensor", "last_session_tariff"),
 )
-TEXT_KEYS = ("panel_empty", "panel_add", "panel_input", "panel_stats")
+TEXT_KEYS = (
+    "panel_empty",
+    "panel_add",
+    "panel_input",
+    "panel_stats",
+    "panel_chart_title",
+    "panel_chart_energy",
+    "panel_chart_cost",
+)
+HISTORY_DAYS = 30
+# Any booking, correction or deletion changes at least one of these.
+WATCH_ENTITIES = (
+    ("sensor", "session_count"),
+    ("sensor", "total_energy"),
+    ("sensor", "total_cost"),
+    ("sensor", "last_session_time"),
+)
 
 _SETUP_DONE: HassKey[bool] = HassKey(f"{DOMAIN}_panel_setup")
 
@@ -144,6 +162,24 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                 rows.append({"entity": entity_id, "name": label(platform, key)})
         return rows
 
+    today = dt_util.now().date()
+
+    def history(vehicle_id: str) -> dict[str, Any]:
+        """Energy and session cost per local day, last HISTORY_DAYS days."""
+        totals = daily_totals(
+            coord.log.sessions(vehicle_id=vehicle_id),
+            today,
+            HISTORY_DAYS,
+            lambda s: dt_util.as_local(s.timestamp).date(),
+        )
+        return {
+            "days": [d.isoformat() for d in totals.days],
+            "energy": totals.energy_kwh,
+            "cost": totals.cost,
+            "total_energy": totals.total_energy_kwh,
+            "total_cost": totals.total_cost,
+        }
+
     vehicles = []
     if coord is not None:
         for vehicle in sorted(coord.vehicles.values(), key=lambda v: v.name.casefold()):
@@ -153,6 +189,11 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "name": vehicle.name,
                     "input": entities(vehicle.id, INPUT_ENTITIES),
                     "stats": entities(vehicle.id, STAT_ENTITIES),
+                    "history": history(vehicle.id),
+                    # The panel redraws the chart when one of these changes.
+                    "watch": [
+                        row["entity"] for row in entities(vehicle.id, WATCH_ENTITIES)
+                    ],
                 }
             )
 
@@ -162,4 +203,5 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
         "vehicles": vehicles,
         "config_url": f"/config/integrations/integration/{DOMAIN}",
         "texts": texts,
+        "currency": hass.config.currency,
     }

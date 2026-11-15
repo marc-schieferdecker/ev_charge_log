@@ -10,9 +10,14 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from custom_components.ev_charge_log.const import DOMAIN
-from custom_components.ev_charge_log.panel import PANEL_COMPONENT, PANEL_URL_PATH
+from custom_components.ev_charge_log.panel import (
+    PANEL_COMPONENT,
+    PANEL_URL_PATH,
+    async_panel_data,
+)
 
 from .conftest import make_subentry as _sub
 from .conftest import setup_entries
@@ -145,3 +150,51 @@ async def test_notification_links_to_panel(hass: HomeAssistant) -> None:
 
     notes = persistent_notification._async_get_or_create_notifications(hass)
     assert "(/ev-charge-log)" in notes["ev_charge_log_charge_seal"]["message"]
+
+
+async def test_panel_history_last_30_days(hass: HomeAssistant, freezer) -> None:
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to("2026-11-15 12:00:00+01:00")
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    from datetime import datetime
+
+    from custom_components.ev_charge_log.models import SessionInput
+
+    tz = dt_util.get_default_time_zone()
+    for day, kwh in ((15, 20.0), (15, 5.0), (1, 10.0), (1, 2.0)):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id="seal",
+                energy_kwh=kwh,
+                charge_type="ac",
+                timestamp=datetime(2026, 11, day, 8, tzinfo=tz),
+                tariff_id="enbw",
+            )
+        )
+    # Outside the 30 days and another vehicle: not counted.
+    await coord.async_add_session(
+        SessionInput(
+            vehicle_id="seal",
+            energy_kwh=99.0,
+            charge_type="ac",
+            timestamp=datetime(2026, 10, 1, 8, tzinfo=tz),
+            tariff_id="enbw",
+        )
+    )
+
+    # Direct call: a frozen clock would invalidate the websocket auth token.
+    result = await async_panel_data(hass)
+    seal = next(v for v in result["vehicles"] if v["id"] == "seal")
+    history = seal["history"]
+    assert len(history["days"]) == 30
+    assert history["days"][-1] == "2026-11-15"
+    assert history["energy"][-1] == 25.0
+    assert history["cost"][-1] == 14.75
+    assert history["energy"][history["days"].index("2026-11-01")] == 12.0
+    assert history["total_energy"] == 37.0
+    assert result["currency"] == hass.config.currency
+    assert len(seal["watch"]) == 4
+
+    dolphin = next(v for v in result["vehicles"] if v["id"] == "dolphin")
+    assert dolphin["history"]["total_energy"] == 0
