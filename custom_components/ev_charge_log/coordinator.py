@@ -24,6 +24,7 @@ from homeassistant.util.hass_dict import HassKey
 
 from .const import (
     CHARGE_TYPE_AC,
+    CHARGE_TYPES,
     DOMAIN,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
@@ -153,6 +154,17 @@ class EvChargeLogCoordinator:
         for vehicle_id, current in self.inputs.items():
             if current.tariff_id not in self.tariffs:
                 current.tariff_id = self.default_tariff_id(vehicle_id)
+            self._align_charge_type(current)
+
+    def _align_charge_type(self, current: VehicleInput) -> None:
+        """Switch AC/DC if the selected tariff only has the other price."""
+        tariff = self.tariffs.get(current.tariff_id) if current.tariff_id else None
+        if tariff is None or tariff.supports(current.charge_type):
+            return
+        for charge_type in CHARGE_TYPES:
+            if tariff.supports(charge_type):
+                current.charge_type = charge_type
+                return
 
     # --- listeners --------------------------------------------------------
 
@@ -212,9 +224,9 @@ class EvChargeLogCoordinator:
         return sorted(self.tariffs, key=lambda t: self.tariffs[t].name.casefold())
 
     def _reset_input(self, vehicle_id: str) -> None:
-        self.inputs[vehicle_id] = VehicleInput(
-            tariff_id=self.default_tariff_id(vehicle_id)
-        )
+        current = VehicleInput(tariff_id=self.default_tariff_id(vehicle_id))
+        self._align_charge_type(current)
+        self.inputs[vehicle_id] = current
 
     @callback
     def async_reset_input(self, vehicle_id: str) -> None:
@@ -224,9 +236,16 @@ class EvChargeLogCoordinator:
 
     @callback
     def async_set_input(self, vehicle_id: str, **values: Any) -> None:
-        """Change dashboard input fields of a vehicle."""
+        """Change dashboard input fields of a vehicle.
+
+        Choosing a tariff that only has an AC or only a DC price switches the
+        charge type accordingly. Choosing a charge type is never overridden.
+        """
+        current = self.inputs[vehicle_id]
         for name, value in values.items():
-            setattr(self.inputs[vehicle_id], name, value)
+            setattr(current, name, value)
+        if "tariff_id" in values:
+            self._align_charge_type(current)
         self._async_notify()
 
     async def async_book_input(self, vehicle_id: str, now: datetime) -> Session:

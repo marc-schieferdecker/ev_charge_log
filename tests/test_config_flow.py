@@ -199,6 +199,24 @@ async def test_add_free_tariff_without_dc_price(hass: HomeAssistant, tariffs) ->
     assert data == {"price_ac": 0.0, "price_dc": None}
 
 
+async def test_add_dc_only_tariff(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "EWE Go", "price_dc": 0.62}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert dict(_sub(tariffs, "EWE Go").data) == {"price_ac": None, "price_dc": 0.62}
+
+
+async def test_tariff_without_price_is_rejected(hass: HomeAssistant, tariffs) -> None:
+    result = await _start(hass, tariffs, "tariff")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Nothing"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "price_required"}
+
+
 async def test_negative_price_is_rejected(hass: HomeAssistant, tariffs) -> None:
     result = await _start(hass, tariffs, "tariff")
     with pytest.raises(InvalidData):

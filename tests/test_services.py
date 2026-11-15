@@ -31,6 +31,7 @@ async def entry(hass: HomeAssistant) -> MockConfigEntry:
         [
             _sub("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
             _sub("tariff", "free", "Arbeitgeber", price_ac=0.0, price_dc=None),
+            _sub("tariff", "ewe", "EWE Go", price_ac=None, price_dc=0.62),
             _sub("vehicle", "seal", "Seal U", default_tariff_id="enbw"),
             _sub("vehicle", "dolphin", "Dolphin", default_tariff_id="free"),
         ],
@@ -125,6 +126,23 @@ async def test_add_session_naive_time_is_local(hass: HomeAssistant, entry) -> No
         timestamp="2026-11-01 12:00:00",
     )
     assert result["session"]["timestamp"] == "2026-11-01T12:00:00+01:00"
+
+
+async def test_charge_type_without_tariff_price_is_rejected(
+    hass: HomeAssistant, entry
+) -> None:
+    # "Arbeitgeber" has only an AC price.
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(
+            hass,
+            "add_session",
+            vehicle=_device(hass, "dolphin"),
+            tariff=_device(hass, "free"),
+            energy_kwh=10,
+            charge_type="dc",
+        )
+    assert err.value.translation_key == "invalid_session"
+    assert "no DC price" in err.value.translation_placeholders["error"]
 
 
 async def test_tariff_device_as_vehicle_is_rejected(hass: HomeAssistant, entry) -> None:
@@ -274,7 +292,7 @@ async def test_input_preselects_default_tariff(hass: HomeAssistant, entry) -> No
     dolphin = hass.states.get(_entity(hass, "select", "dolphin", "input_tariff"))
     assert seal.state == "EnBW"
     assert dolphin.state == "Arbeitgeber"
-    assert seal.attributes["options"] == ["Arbeitgeber", "EnBW"]
+    assert seal.attributes["options"] == ["Arbeitgeber", "EnBW", "EWE Go"]
     charge = hass.states.get(_entity(hass, "select", "seal", "input_charge_type"))
     assert charge.state == "ac"
 
@@ -340,6 +358,49 @@ async def test_reset_button_clears_input(hass: HomeAssistant, entry) -> None:
     await _press(hass, _entity(hass, "button", "seal", "reset_input"))
     assert hass.states.get(cost).state == "unknown"
     assert hass.states.get(tariff).state == "EnBW"
+
+
+async def test_tariff_choice_aligns_charge_type(hass: HomeAssistant, entry) -> None:
+    tariff = _entity(hass, "select", "seal", "input_tariff")
+    charge = _entity(hass, "select", "seal", "input_charge_type")
+
+    await _set(hass, "select", tariff, option="EWE Go")  # DC only
+    assert hass.states.get(charge).state == "dc"
+
+    await _set(hass, "select", tariff, option="EnBW")  # AC and DC: keep DC
+    assert hass.states.get(charge).state == "dc"
+
+    await _set(hass, "select", tariff, option="Arbeitgeber")  # AC only
+    assert hass.states.get(charge).state == "ac"
+
+
+async def test_dc_only_default_tariff_presets_dc(hass: HomeAssistant, entry) -> None:
+    hass.config_entries.async_update_subentry(
+        entry,
+        entry.subentries["dolphin"],
+        data={**entry.subentries["dolphin"].data, "default_tariff_id": "ewe"},
+    )
+    await hass.async_block_till_done()  # reloads the vehicles entry
+    charge = _entity(hass, "select", "dolphin", "input_charge_type")
+    assert hass.states.get(charge).state == "dc"
+
+    await _set(hass, "select", charge, option="ac")  # explicit choice is kept
+    assert hass.states.get(charge).state == "ac"
+    await _press(hass, _entity(hass, "button", "dolphin", "reset_input"))
+    assert hass.states.get(charge).state == "dc"
+
+
+async def test_book_dc_only_tariff_from_dashboard(hass: HomeAssistant, entry) -> None:
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_energy"), value=30
+    )
+    await _set(
+        hass, "select", _entity(hass, "select", "seal", "input_tariff"), option="EWE Go"
+    )
+    await _press(hass, _entity(hass, "button", "seal", "book"))
+    session = entry.runtime_data.log.last_session("seal")
+    assert session.charge_type == "dc"
+    assert session.cost == 18.60
 
 
 async def test_input_is_per_vehicle(hass: HomeAssistant, entry) -> None:

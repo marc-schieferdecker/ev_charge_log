@@ -63,7 +63,8 @@
             "price_dc": "Price DC"
           },
           "data_description": {
-            "price_dc": "Optional. If empty, the AC price is used for DC charging as well."
+            "price_ac": "Leave empty if the provider offers no AC charging.",
+            "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required."
           }
         },
         "reconfigure": {
@@ -75,13 +76,15 @@
             "price_dc": "Price DC"
           },
           "data_description": {
-            "price_dc": "Optional. If empty, the AC price is used for DC charging as well."
+            "price_ac": "Leave empty if the provider offers no AC charging.",
+            "price_dc": "Leave empty if the provider offers no DC charging. At least one price is required."
           }
         }
       },
       "error": {
         "name_required": "Please enter a name.",
-        "name_exists": "A tariff with this name already exists."
+        "name_exists": "A tariff with this name already exists.",
+        "price_required": "Enter at least an AC or a DC price."
       }
     }
   },

@@ -23,6 +23,7 @@ NOW = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
 
 ENBW = Tariff(id="enbw", name="EnBW", price_ac=0.59, price_dc=0.69)
 AC_ONLY = Tariff(id="ac_only", name="AC only", price_ac=0.39)
+DC_ONLY = Tariff(id="ewe", name="EWE Go", price_dc=0.62)
 FREE = Tariff(id="free", name="Employer", price_ac=0.0)
 
 
@@ -53,10 +54,25 @@ def test_cost_from_tariff_dc() -> None:
     assert result.price_per_kwh == 0.69
 
 
-def test_dc_price_missing_falls_back_to_ac() -> None:
-    result = calculate_cost(10.0, "dc", AC_ONLY)
-    assert result.cost == 3.90
-    assert result.price_per_kwh == 0.39
+def test_dc_price_missing_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        calculate_cost(10.0, "dc", AC_ONLY)
+
+
+def test_ac_price_missing_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        calculate_cost(10.0, "ac", DC_ONLY)
+
+
+def test_dc_only_tariff_books_dc() -> None:
+    result = calculate_cost(30.0, "dc", DC_ONLY)
+    assert result.cost == 18.60
+    assert result.price_per_kwh == 0.62
+
+
+def test_missing_price_is_rejected_even_with_cost() -> None:
+    with pytest.raises(ValidationError):
+        calculate_cost(10.0, "ac", DC_ONLY, cost=5.0)
 
 
 def test_given_cost_overrides_tariff() -> None:
@@ -126,6 +142,27 @@ def test_rounding_half_up() -> None:
 def test_negative_tariff_price_is_rejected() -> None:
     with pytest.raises(ValidationError):
         Tariff(id="x", name="x", price_ac=-0.1)
+
+
+def test_tariff_without_any_price_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Tariff(id="x", name="x")
+
+
+def test_tariff_supports() -> None:
+    assert AC_ONLY.supports("ac")
+    assert not AC_ONLY.supports("dc")
+    assert DC_ONLY.supports("dc")
+    assert not DC_ONLY.supports("ac")
+    assert FREE.supports("ac")
+
+
+def test_dc_only_tariff_from_dict() -> None:
+    tariff = Tariff.from_dict(
+        {"id": "e", "name": "EWE", "price_ac": None, "price_dc": 0.62}
+    )
+    assert tariff.price_ac is None
+    assert tariff.price_dc == 0.62
 
 
 def test_tariff_from_dict_roundtrip_fields() -> None:

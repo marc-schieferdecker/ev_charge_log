@@ -109,6 +109,10 @@ class EvChargeLogConfigFlow(ConfigFlow, domain=DOMAIN):
 class _NamedSubentryFlow(ConfigSubentryFlow):
     """Shared logic: unique names within one subentry type."""
 
+    def _validate(self, user_input: dict[str, Any]) -> dict[str, str]:
+        """Type-specific checks; return form errors."""
+        return {}
+
     def _name_taken(self, name: str, own_id: str | None = None) -> bool:
         wanted = name.strip().casefold()
         return any(
@@ -139,6 +143,8 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
             elif self._name_taken(name, own_id):
                 errors[CONF_NAME] = "name_exists"
             else:
+                errors = self._validate(user_input)
+            if not errors:
                 data = to_data(user_input)
                 if current is None:
                     return self.async_create_entry(title=name, data=data)
@@ -211,23 +217,34 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
 class TariffSubentryFlow(_NamedSubentryFlow):
     """Add or change a tariff (stage 1 fields only).
 
-    Changing prices never touches booked sessions: their cost is stored.
+    AC and DC price are optional, at least one is required. Changing prices
+    never touches booked sessions: their cost is stored.
     """
 
     _SCHEMA = vol.Schema(
         {
             vol.Required(CONF_NAME): _NAME_SELECTOR,
-            vol.Required(CONF_PRICE_AC): _PRICE_SELECTOR,
+            vol.Optional(CONF_PRICE_AC): _PRICE_SELECTOR,
             vol.Optional(CONF_PRICE_DC): _PRICE_SELECTOR,
         }
     )
 
+    def _validate(self, user_input: dict[str, Any]) -> dict[str, str]:
+        if user_input.get(CONF_PRICE_AC) is None and (
+            user_input.get(CONF_PRICE_DC) is None
+        ):
+            return {"base": "price_required"}
+        return {}
+
     @staticmethod
     def _to_data(user_input: dict[str, Any]) -> dict[str, Any]:
-        price_dc = user_input.get(CONF_PRICE_DC)
+        def price(key: str) -> float | None:
+            value = user_input.get(key)
+            return float(value) if value is not None else None
+
         return {
-            CONF_PRICE_AC: float(user_input[CONF_PRICE_AC]),
-            CONF_PRICE_DC: float(price_dc) if price_dc is not None else None,
+            CONF_PRICE_AC: price(CONF_PRICE_AC),
+            CONF_PRICE_DC: price(CONF_PRICE_DC),
         }
 
     async def async_step_user(

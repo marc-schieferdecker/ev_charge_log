@@ -67,11 +67,16 @@ class Vehicle:
 
 @dataclass(frozen=True, slots=True)
 class Tariff:
-    """A charging tariff. Prices of 0 are valid (e.g. free charging)."""
+    """A charging tariff. Prices of 0 are valid (e.g. free charging).
+
+    AC and DC prices are each optional, but at least one is required. A tariff
+    only accepts sessions of the charge types it has a price for; there is no
+    fallback from one price to the other.
+    """
 
     id: str
     name: str
-    price_ac: float
+    price_ac: float | None = None
     price_dc: float | None = None
     zones: tuple[str, ...] = ()
     valid_from: date | None = None
@@ -79,15 +84,27 @@ class Tariff:
 
     def __post_init__(self) -> None:
         """Validate the tariff."""
+        if self.price_ac is None and self.price_dc is None:
+            raise ValidationError("a tariff needs an AC or a DC price")
         _require_non_negative("price_ac", self.price_ac)
         _require_non_negative("price_dc", self.price_dc)
         _require_non_negative("monthly_fee", self.monthly_fee)
 
+    def supports(self, charge_type: str) -> bool:
+        """Whether the tariff has a price for this charge type."""
+        return self._price(charge_type) is not None
+
     def price_for(self, charge_type: str) -> float:
-        """Return the price per kWh for a charge type, DC falls back to AC."""
-        if charge_type == CHARGE_TYPE_DC and self.price_dc is not None:
-            return self.price_dc
-        return self.price_ac
+        """Return the price per kWh; reject charge types without a price."""
+        price = self._price(charge_type)
+        if price is None:
+            raise ValidationError(
+                f"tariff {self.name} has no {charge_type.upper()} price"
+            )
+        return price
+
+    def _price(self, charge_type: str) -> float | None:
+        return self.price_dc if charge_type == CHARGE_TYPE_DC else self.price_ac
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Tariff:
@@ -96,7 +113,7 @@ class Tariff:
         return cls(
             id=data["id"],
             name=data["name"],
-            price_ac=float(data["price_ac"]),
+            price_ac=_optional_float(data.get("price_ac")),
             price_dc=_optional_float(data.get("price_dc")),
             zones=tuple(data.get("zones") or ()),
             valid_from=date.fromisoformat(valid_from) if valid_from else None,
@@ -203,7 +220,9 @@ def calculate_cost(
     """Calculate the cost of a session at booking time.
 
     A given amount (including 0) always wins. Otherwise energy x tariff price.
-    `None` means "not given"; 0 is a valid value.
+    `None` means "not given"; 0 is a valid value. A tariff without a price
+    for the charge type is rejected, also with a given amount: the tariff
+    does not offer that charge type.
     """
     if charge_type not in CHARGE_TYPES:
         raise ValidationError(f"invalid charge_type: {charge_type}")

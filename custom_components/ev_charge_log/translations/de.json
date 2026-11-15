@@ -63,7 +63,8 @@
             "price_dc": "Preis DC"
           },
           "data_description": {
-            "price_dc": "Optional. Ohne Angabe gilt der AC-Preis auch für DC."
+            "price_ac": "Leer lassen, wenn der Anbieter kein AC-Laden anbietet.",
+            "price_dc": "Leer lassen, wenn der Anbieter kein DC-Laden anbietet. Mindestens ein Preis ist nötig."
           }
         },
         "reconfigure": {
@@ -75,13 +76,15 @@
             "price_dc": "Preis DC"
           },
           "data_description": {
-            "price_dc": "Optional. Ohne Angabe gilt der AC-Preis auch für DC."
+            "price_ac": "Leer lassen, wenn der Anbieter kein AC-Laden anbietet.",
+            "price_dc": "Leer lassen, wenn der Anbieter kein DC-Laden anbietet. Mindestens ein Preis ist nötig."
           }
         }
       },
       "error": {
         "name_required": "Bitte einen Namen eingeben.",
-        "name_exists": "Einen Tarif mit diesem Namen gibt es bereits."
+        "name_exists": "Einen Tarif mit diesem Namen gibt es bereits.",
+        "price_required": "Bitte mindestens einen AC- oder DC-Preis eingeben."
       }
     }
   },
