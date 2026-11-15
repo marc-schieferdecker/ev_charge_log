@@ -8,13 +8,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, SUBENTRY_TYPE_TARIFF, SUBENTRY_TYPE_VEHICLE
+from .const import (
+    CHARGE_TYPE_AC,
+    DOMAIN,
+    SUBENTRY_TYPE_TARIFF,
+    SUBENTRY_TYPE_VEHICLE,
+)
 from .models import Session, SessionInput, Tariff, ValidationError, Vehicle
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
 
@@ -37,6 +44,16 @@ class _SessionStore(Store[dict[str, Any]]):
         return migrate(old_major_version, old_minor_version, old_data)
 
 
+@dataclass(slots=True)
+class VehicleInput:
+    """Dashboard input fields of one vehicle (not persisted)."""
+
+    energy_kwh: float | None = None
+    cost: float | None = None
+    tariff_id: str | None = None
+    charge_type: str = CHARGE_TYPE_AC
+
+
 class EvChargeLogCoordinator:
     """Holds the session log and notifies entities after every change."""
 
@@ -51,6 +68,10 @@ class EvChargeLogCoordinator:
         self.tariffs: dict[str, Tariff] = {}
         self._listeners: list[CALLBACK_TYPE] = []
         self._load_subentries(entry)
+        self.inputs: dict[str, VehicleInput] = {}
+        for vehicle_id in self.vehicles:
+            self.inputs[vehicle_id] = VehicleInput()
+            self._reset_input(vehicle_id)
 
     def _load_subentries(self, entry: ConfigEntry) -> None:
         for sub in entry.get_subentries_of_type(SUBENTRY_TYPE_VEHICLE):
@@ -112,6 +133,55 @@ class EvChargeLogCoordinator:
         self._require_vehicle(vehicle_id)
         session = self.log.delete(vehicle_id, session_id)
         await self._async_commit()
+        return session
+
+    # --- dashboard input ----------------------------------------------------
+
+    def default_tariff_id(self, vehicle_id: str) -> str | None:
+        """Vehicle default tariff if it still exists, else the first tariff."""
+        default = self.vehicles[vehicle_id].default_tariff_id
+        if default in self.tariffs:
+            return default
+        return next(iter(self.sorted_tariffs()), None)
+
+    def sorted_tariffs(self) -> list[str]:
+        """Tariff IDs sorted by name."""
+        return sorted(self.tariffs, key=lambda t: self.tariffs[t].name.casefold())
+
+    def _reset_input(self, vehicle_id: str) -> None:
+        self.inputs[vehicle_id] = VehicleInput(
+            tariff_id=self.default_tariff_id(vehicle_id)
+        )
+
+    @callback
+    def async_reset_input(self, vehicle_id: str) -> None:
+        """Clear the dashboard input of a vehicle."""
+        self._reset_input(vehicle_id)
+        self._async_notify()
+
+    @callback
+    def async_set_input(self, vehicle_id: str, **values: Any) -> None:
+        """Change dashboard input fields of a vehicle."""
+        for name, value in values.items():
+            setattr(self.inputs[vehicle_id], name, value)
+        self._async_notify()
+
+    async def async_book_input(self, vehicle_id: str, now: datetime) -> Session:
+        """Book the dashboard input as a session, then reset the input."""
+        current = self.inputs[vehicle_id]
+        if current.energy_kwh is None:
+            raise ValidationError("energy_kwh is required")
+        session = await self.async_add_session(
+            SessionInput(
+                vehicle_id=vehicle_id,
+                energy_kwh=current.energy_kwh,
+                charge_type=current.charge_type,
+                timestamp=now,
+                tariff_id=current.tariff_id,
+                cost=current.cost,
+            )
+        )
+        self.async_reset_input(vehicle_id)
         return session
 
     def _require_vehicle(self, vehicle_id: str) -> None:

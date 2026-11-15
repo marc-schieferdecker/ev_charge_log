@@ -15,11 +15,11 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import PERCENTAGE, UnitOfEnergy
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import EvChargeLogConfigEntry, EvChargeLogCoordinator
+from .entity import EvChargeLogEntity, tariff_device, vehicle_device
 from .models import Session, soc_metrics
 
 # Unit placeholders, replaced with the HA currency at runtime.
@@ -205,29 +205,23 @@ async def async_setup_entry(
 ) -> None:
     """Create sensors for every vehicle and tariff subentry."""
     coord = entry.runtime_data
-    for vehicle in coord.vehicles.values():
-        device = DeviceInfo(identifiers={(DOMAIN, vehicle.id)}, name=vehicle.name)
+    for vehicle_id in coord.vehicles:
+        device = vehicle_device(coord, vehicle_id)
         async_add_entities(
-            [EvChargeLogSensor(coord, vehicle.id, device, d) for d in VEHICLE_SENSORS],
-            config_subentry_id=vehicle.id,
+            [EvChargeLogSensor(coord, vehicle_id, device, d) for d in VEHICLE_SENSORS],
+            config_subentry_id=vehicle_id,
         )
-    for tariff in coord.tariffs.values():
-        device = DeviceInfo(
-            identifiers={(DOMAIN, tariff.id)},
-            name=tariff.name,
-            entry_type=DeviceEntryType.SERVICE,
-        )
+    for tariff_id in coord.tariffs:
+        device = tariff_device(coord, tariff_id)
         async_add_entities(
-            [EvChargeLogSensor(coord, tariff.id, device, d) for d in TARIFF_SENSORS],
-            config_subentry_id=tariff.id,
+            [EvChargeLogSensor(coord, tariff_id, device, d) for d in TARIFF_SENSORS],
+            config_subentry_id=tariff_id,
         )
 
 
-class EvChargeLogSensor(SensorEntity):
+class EvChargeLogSensor(EvChargeLogEntity, SensorEntity):
     """A sensor computed from the session log."""
 
-    _attr_has_entity_name = True
-    _attr_should_poll = False
     entity_description: EvChargeLogSensorDescription
 
     def __init__(
@@ -238,20 +232,12 @@ class EvChargeLogSensor(SensorEntity):
         description: EvChargeLogSensorDescription,
     ) -> None:
         """Initialize the sensor."""
-        self.entity_description = description
-        self._coord = coord
-        self._subentry_id = subentry_id
-        self._attr_unique_id = f"{subentry_id}_{description.key}"
-        self._attr_device_info = device
+        super().__init__(coord, subentry_id, device, description)
         unit = description.native_unit_of_measurement
         if unit is not None and "{currency}" in unit:
             self._attr_native_unit_of_measurement = unit.format(
                 currency=coord.hass.config.currency
             )
-
-    async def async_added_to_hass(self) -> None:
-        """Follow session log changes."""
-        self.async_on_remove(self._coord.async_add_listener(self.async_write_ha_state))
 
     @property
     def native_value(self) -> Any:

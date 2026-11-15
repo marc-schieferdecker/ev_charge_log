@@ -100,6 +100,88 @@
       "last_session_cost_per_soc_point": { "name": "Last session cost per SoC point" },
       "tariff_total_cost": { "name": "Total cost" },
       "tariff_total_energy": { "name": "Total energy" }
+    },
+    "number": {
+      "input_energy": { "name": "Input energy" },
+      "input_cost": { "name": "Input cost (optional)" }
+    },
+    "select": {
+      "input_tariff": { "name": "Input tariff" },
+      "input_charge_type": {
+        "name": "Input charge type",
+        "state": { "ac": "AC", "dc": "DC" }
+      }
+    },
+    "button": {
+      "book": { "name": "Book session" },
+      "reset_input": { "name": "Reset input" }
+    }
+  },
+  "selector": {
+    "charge_type": {
+      "options": { "ac": "AC", "dc": "DC" }
+    }
+  },
+  "exceptions": {
+    "not_loaded": { "message": "EV Charge Log is not set up or not loaded." },
+    "unknown_vehicle": { "message": "The selected device is not an EV Charge Log vehicle." },
+    "unknown_tariff": { "message": "The selected device is not an EV Charge Log tariff." },
+    "session_not_found": { "message": "No matching session found for this vehicle." },
+    "invalid_session": { "message": "The session could not be saved: {error}" },
+    "energy_required": { "message": "Please enter the charged energy first." },
+    "cost_conflict": { "message": "Use either a cost or \"Clear cost\", not both." }
+  },
+  "services": {
+    "add_session": {
+      "name": "Add session",
+      "description": "Books a charging session. The cost is calculated from the tariff now and stored; a given cost overrides the tariff.",
+      "fields": {
+        "vehicle": { "name": "Vehicle", "description": "Vehicle that was charged." },
+        "energy_kwh": { "name": "Energy", "description": "Charged energy from the receipt or the provider's app." },
+        "charge_type": { "name": "Charge type", "description": "AC or DC; selects the tariff price." },
+        "tariff": { "name": "Tariff", "description": "Tariff used. Required unless a cost is given." },
+        "cost": { "name": "Cost", "description": "Total amount. Overrides the tariff calculation; 0 is allowed." },
+        "timestamp": { "name": "Time", "description": "End of charging. Defaults to now." },
+        "soc_start": { "name": "SoC start", "description": "Display only, never used for costs." },
+        "soc_end": { "name": "SoC end", "description": "Display only, never used for costs." },
+        "location": { "name": "Location", "description": "Free text." },
+        "note": { "name": "Note", "description": "Free text." }
+      }
+    },
+    "update_session": {
+      "name": "Update session",
+      "description": "Corrects a session, by default the vehicle's last one. Changing only the energy keeps the stored price; changing tariff or charge type uses the tariff's current price.",
+      "fields": {
+        "vehicle": { "name": "Vehicle", "description": "Vehicle of the session." },
+        "session_id": { "name": "Session ID", "description": "Session to change. Defaults to the vehicle's last session." },
+        "energy_kwh": { "name": "Energy", "description": "Corrected energy." },
+        "charge_type": { "name": "Charge type", "description": "Corrected charge type." },
+        "tariff": { "name": "Tariff", "description": "Corrected tariff." },
+        "cost": { "name": "Cost", "description": "Manual total amount; 0 is allowed." },
+        "clear_cost": { "name": "Clear cost", "description": "Remove a manual cost and calculate from the tariff again." },
+        "timestamp": { "name": "Time", "description": "Corrected end of charging." },
+        "soc_start": { "name": "SoC start", "description": "Display only." },
+        "soc_end": { "name": "SoC end", "description": "Display only." },
+        "location": { "name": "Location", "description": "Free text." },
+        "note": { "name": "Note", "description": "Free text." }
+      }
+    },
+    "delete_session": {
+      "name": "Delete session",
+      "description": "Deletes a session, by default the vehicle's last one.",
+      "fields": {
+        "vehicle": { "name": "Vehicle", "description": "Vehicle of the session." },
+        "session_id": { "name": "Session ID", "description": "Session to delete. Defaults to the vehicle's last session." }
+      }
+    },
+    "list_sessions": {
+      "name": "List sessions",
+      "description": "Returns sessions as response data, sorted by time.",
+      "fields": {
+        "vehicle": { "name": "Vehicle", "description": "Only sessions of this vehicle." },
+        "start": { "name": "From", "description": "Only sessions at or after this time." },
+        "end": { "name": "Until", "description": "Only sessions at or before this time." }
+      }
     }
   }
 }

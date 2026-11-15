@@ -97,7 +97,8 @@ async def test_entities_are_created_per_subentry(hass: HomeAssistant, entry) -> 
         by_subentry[ent.config_subentry_id] = (
             by_subentry.get(ent.config_subentry_id, 0) + 1
         )
-    assert by_subentry == {"seal": 11, "dolphin": 11, "enbw": 2, "free": 2}
+    # Vehicle: 11 sensors + 2 numbers + 2 selects + 2 buttons; tariff: 2 sensors
+    assert by_subentry == {"seal": 17, "dolphin": 17, "enbw": 2, "free": 2}
 
 
 async def test_initial_states(hass: HomeAssistant, entry) -> None:

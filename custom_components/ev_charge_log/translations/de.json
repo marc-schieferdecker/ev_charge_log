@@ -100,6 +100,88 @@
       "last_session_cost_per_soc_point": { "name": "Letzte Ladung Kosten pro SoC-Prozentpunkt" },
       "tariff_total_cost": { "name": "Gesamtkosten" },
       "tariff_total_energy": { "name": "Gesamtenergie" }
+    },
+    "number": {
+      "input_energy": { "name": "Eingabe Energie" },
+      "input_cost": { "name": "Eingabe Betrag (optional)" }
+    },
+    "select": {
+      "input_tariff": { "name": "Eingabe Tarif" },
+      "input_charge_type": {
+        "name": "Eingabe Ladeart",
+        "state": { "ac": "AC", "dc": "DC" }
+      }
+    },
+    "button": {
+      "book": { "name": "Ladung buchen" },
+      "reset_input": { "name": "Eingabe zurücksetzen" }
+    }
+  },
+  "selector": {
+    "charge_type": {
+      "options": { "ac": "AC", "dc": "DC" }
+    }
+  },
+  "exceptions": {
+    "not_loaded": { "message": "EV Charge Log ist nicht eingerichtet oder nicht geladen." },
+    "unknown_vehicle": { "message": "Das gewählte Gerät ist kein Fahrzeug von EV Charge Log." },
+    "unknown_tariff": { "message": "Das gewählte Gerät ist kein Tarif von EV Charge Log." },
+    "session_not_found": { "message": "Für dieses Fahrzeug wurde keine passende Ladung gefunden." },
+    "invalid_session": { "message": "Die Ladung konnte nicht gespeichert werden: {error}" },
+    "energy_required": { "message": "Bitte zuerst die geladene Energie eingeben." },
+    "cost_conflict": { "message": "Entweder einen Betrag angeben oder „Betrag entfernen“ wählen, nicht beides." }
+  },
+  "services": {
+    "add_session": {
+      "name": "Ladung buchen",
+      "description": "Bucht eine Ladung. Die Kosten werden jetzt aus dem Tarif berechnet und gespeichert, ein angegebener Betrag hat Vorrang.",
+      "fields": {
+        "vehicle": { "name": "Fahrzeug", "description": "Geladenes Fahrzeug." },
+        "energy_kwh": { "name": "Energie", "description": "Geladene Energie laut Beleg oder App des Anbieters." },
+        "charge_type": { "name": "Ladeart", "description": "AC oder DC, bestimmt den Tarifpreis." },
+        "tariff": { "name": "Tarif", "description": "Verwendeter Tarif. Pflicht, wenn kein Betrag angegeben ist." },
+        "cost": { "name": "Betrag", "description": "Gesamtbetrag. Hat Vorrang vor der Tarifberechnung, 0 ist erlaubt." },
+        "timestamp": { "name": "Zeitpunkt", "description": "Ende der Ladung. Ohne Angabe: jetzt." },
+        "soc_start": { "name": "SoC Beginn", "description": "Nur Anzeige, nie für Kosten." },
+        "soc_end": { "name": "SoC Ende", "description": "Nur Anzeige, nie für Kosten." },
+        "location": { "name": "Ort", "description": "Freitext." },
+        "note": { "name": "Notiz", "description": "Freitext." }
+      }
+    },
+    "update_session": {
+      "name": "Ladung korrigieren",
+      "description": "Korrigiert eine Ladung, ohne Angabe die letzte des Fahrzeugs. Ändern sich nur die kWh, gilt der gespeicherte Preis weiter. Bei Wechsel von Tarif oder Ladeart gilt der aktuelle Tarifpreis.",
+      "fields": {
+        "vehicle": { "name": "Fahrzeug", "description": "Fahrzeug der Ladung." },
+        "session_id": { "name": "Ladungs-ID", "description": "Zu ändernde Ladung. Ohne Angabe die letzte des Fahrzeugs." },
+        "energy_kwh": { "name": "Energie", "description": "Korrigierte Energie." },
+        "charge_type": { "name": "Ladeart", "description": "Korrigierte Ladeart." },
+        "tariff": { "name": "Tarif", "description": "Korrigierter Tarif." },
+        "cost": { "name": "Betrag", "description": "Gesamtbetrag von Hand, 0 ist erlaubt." },
+        "clear_cost": { "name": "Betrag entfernen", "description": "Einen von Hand eingegebenen Betrag entfernen und wieder aus dem Tarif rechnen." },
+        "timestamp": { "name": "Zeitpunkt", "description": "Korrigiertes Ende der Ladung." },
+        "soc_start": { "name": "SoC Beginn", "description": "Nur Anzeige." },
+        "soc_end": { "name": "SoC Ende", "description": "Nur Anzeige." },
+        "location": { "name": "Ort", "description": "Freitext." },
+        "note": { "name": "Notiz", "description": "Freitext." }
+      }
+    },
+    "delete_session": {
+      "name": "Ladung löschen",
+      "description": "Löscht eine Ladung, ohne Angabe die letzte des Fahrzeugs.",
+      "fields": {
+        "vehicle": { "name": "Fahrzeug", "description": "Fahrzeug der Ladung." },
+        "session_id": { "name": "Ladungs-ID", "description": "Zu löschende Ladung. Ohne Angabe die letzte des Fahrzeugs." }
+      }
+    },
+    "list_sessions": {
+      "name": "Ladungen auflisten",
+      "description": "Gibt Ladungen als Antwortdaten zurück, nach Zeit sortiert.",
+      "fields": {
+        "vehicle": { "name": "Fahrzeug", "description": "Nur Ladungen dieses Fahrzeugs." },
+        "start": { "name": "Von", "description": "Nur Ladungen ab diesem Zeitpunkt." },
+        "end": { "name": "Bis", "description": "Nur Ladungen bis zu diesem Zeitpunkt." }
+      }
     }
   }
 }

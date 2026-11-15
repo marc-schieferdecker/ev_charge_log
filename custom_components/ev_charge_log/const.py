@@ -20,6 +20,10 @@ CHARGE_TYPE_AC: Final = "ac"
 CHARGE_TYPE_DC: Final = "dc"
 CHARGE_TYPES: Final = (CHARGE_TYPE_AC, CHARGE_TYPE_DC)
 
+# Device model IDs, used to filter device selectors in actions.
+MODEL_ID_VEHICLE: Final = "vehicle"
+MODEL_ID_TARIFF: Final = "tariff"
+
 SOURCE_MANUAL: Final = "manual"
 SOURCE_REMINDER: Final = "reminder"
 SOURCES: Final = (SOURCE_MANUAL, SOURCE_REMINDER)
