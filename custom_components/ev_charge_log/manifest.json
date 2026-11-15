@@ -1,6 +1,7 @@
 {
   "domain": "ev_charge_log",
   "name": "EV Charge Log",
+  "categories": ["energy.ev_charging", "vehicles_transport.cars_evs"],
   "codeowners": ["@marc-schieferdecker"],
   "config_flow": true,
   "dependencies": [],
