@@ -73,6 +73,11 @@ const STYLE = `
   }
   rect.hit {
     fill: transparent;
+    cursor: pointer;
+  }
+  rect.hit.selected {
+    fill: var(--primary-text-color);
+    fill-opacity: 0.08;
   }
   .axis {
     display: flex;
@@ -252,6 +257,7 @@ class EvChargeLogPanel extends HTMLElement {
     this._lists = new Map(); // vehicle id -> session list card element
     this._page = new Map(); // vehicle id -> page of the session list (0 = newest)
     this._month = new Map(); // vehicle id -> month shown in the chart ("YYYY-MM")
+    this._selected = new Map(); // vehicle id -> index of the tapped day
     this._data = null;
     this._watch = [];
     this._watchSignature = "";
@@ -369,6 +375,7 @@ class EvChargeLogPanel extends HTMLElement {
     this._charts = new Map();
     this._lists = new Map();
     this._month = new Map(); // a full reload starts at the current month
+    this._selected = new Map();
     this._data = data;
     this._watch = data.vehicles.flatMap((v) => v.watch || []);
     this._watchSignature = this._signature();
@@ -721,6 +728,7 @@ class EvChargeLogPanel extends HTMLElement {
   async _showMonth(card, vehicle, month) {
     try {
       const history = await this._fetchHistory(vehicle.id, month);
+      if (month !== this._month.get(vehicle.id)) this._selected.delete(vehicle.id);
       this._month.set(vehicle.id, month);
       this._fillChartCard(card, vehicle, this._data, history);
     } catch (err) {
@@ -733,9 +741,25 @@ class EvChargeLogPanel extends HTMLElement {
     const formatEnergy = (v) => `${this._number(v, 1)} kWh`;
     const formatCost = (v) => this._money(v, data.currency);
 
+    // Tapping a day shows its values (no hover on phones); tapping it again
+    // or anywhere else in the card shows the month totals again.
+    let selected = this._selected.get(vehicle.id);
+    if (selected === undefined || selected >= history.days.length) selected = null;
+    const select = (index) => {
+      if (index === null || index === selected) this._selected.delete(vehicle.id);
+      else this._selected.set(vehicle.id, index);
+      this._fillChartCard(card, vehicle, data, history);
+    };
+
     card.innerHTML = "";
     const body = document.createElement("div");
     body.className = "chart-card";
+    body.addEventListener("click", (ev) => {
+      if (selected === null) return;
+      const onBar = ev.target.classList && ev.target.classList.contains("hit");
+      const onButton = ev.target.closest && ev.target.closest("button");
+      if (!onBar && !onButton) select(null);
+    });
 
     const header = document.createElement("div");
     header.className = "chart-header";
@@ -752,7 +776,9 @@ class EvChargeLogPanel extends HTMLElement {
         history.energy,
         formatEnergy(history.total_energy),
         formatEnergy,
-        "var(--energy-grid-consumption-color, var(--primary-color))"
+        "var(--energy-grid-consumption-color, var(--primary-color))",
+        selected,
+        select
       )
     );
     body.appendChild(
@@ -762,7 +788,9 @@ class EvChargeLogPanel extends HTMLElement {
         history.cost,
         formatCost(history.total_cost),
         formatCost,
-        "var(--warning-color, #ff9800)"
+        "var(--warning-color, #ff9800)",
+        selected,
+        select
       )
     );
 
@@ -792,7 +820,7 @@ class EvChargeLogPanel extends HTMLElement {
     card.appendChild(body);
   }
 
-  _chart(label, days, values, total, format, color) {
+  _chart(label, days, values, total, format, color, selected, select) {
     const wrapper = document.createElement("div");
     wrapper.className = "chart";
 
@@ -802,7 +830,11 @@ class EvChargeLogPanel extends HTMLElement {
     name.textContent = label;
     const sum = document.createElement("span");
     sum.className = "value";
-    sum.textContent = total;
+    // Month total, or the value of the tapped day.
+    sum.textContent =
+      selected === null
+        ? total
+        : `${this._date(days[selected])}: ${format(values[selected])}`;
     head.append(name, sum);
     wrapper.appendChild(head);
 
@@ -814,16 +846,21 @@ class EvChargeLogPanel extends HTMLElement {
     const slot = 100 / values.length;
     values.forEach((value, i) => {
       const height = max > 0 ? (value / max) * 96 : 0;
-      // A full-height transparent rect per day carries the tooltip.
+      // A full-height rect per day is the tap target (and the tooltip with
+      // a mouse); the selected day gets a light background.
       const hit = document.createElementNS(SVG_NS, "rect");
       hit.setAttribute("x", i * slot);
       hit.setAttribute("y", 0);
       hit.setAttribute("width", slot);
       hit.setAttribute("height", 100);
-      hit.setAttribute("class", "hit");
+      hit.setAttribute("class", i === selected ? "hit selected" : "hit");
       const tooltip = document.createElementNS(SVG_NS, "title");
       tooltip.textContent = `${this._date(days[i])}: ${format(value)}`;
       hit.appendChild(tooltip);
+      hit.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        select(i);
+      });
       svg.appendChild(hit);
       if (height > 0) {
         const bar = document.createElementNS(SVG_NS, "rect");
@@ -832,6 +869,8 @@ class EvChargeLogPanel extends HTMLElement {
         bar.setAttribute("width", slot * 0.7);
         bar.setAttribute("height", height);
         bar.setAttribute("fill", color);
+        // With a selection, the other days fade out.
+        if (selected !== null && i !== selected) bar.setAttribute("opacity", "0.35");
         bar.setAttribute("pointer-events", "none");
         svg.appendChild(bar);
       }
