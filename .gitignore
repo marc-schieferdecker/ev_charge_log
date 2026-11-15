@@ -1,0 +1,5 @@
+# Local deploy script (machine-specific paths)
+scripts/deploy.*
+
+# Local Claude Code instructions
+CLAUDE.md
