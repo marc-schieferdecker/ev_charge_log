@@ -72,9 +72,10 @@ async def test_panel_websocket_lists_vehicles(
     seal = result["vehicles"][1]
     assert seal["id"] == "seal"
     inputs = [row["entity"] for row in seal["input"]]
-    assert len(inputs) == 7
+    assert len(inputs) == 6
     assert inputs[0].startswith("date.")
-    assert inputs[-2:] == [e for e in inputs if e.startswith("button.")]
+    assert [e for e in inputs if e.startswith("button.")] == [inputs[-1]]
+    assert not any(e.endswith("reset_input") for e in inputs)
     # Short names without the vehicle name.
     assert [row["name"] for row in seal["input"]] == [
         "Datum (optional)",
@@ -83,7 +84,6 @@ async def test_panel_websocket_lists_vehicles(
         "Tarif",
         "Ladeart",
         "Ladung buchen",
-        "Eingabe zurücksetzen",
     ]
     assert seal["stats"][0]["entity"].startswith("sensor.")
     assert seal["stats"][0]["name"] == "Gesamtkosten"

@@ -42,7 +42,8 @@ INPUT_ENTITIES = (
     ("select", "input_tariff"),
     ("select", "input_charge_type"),
     ("button", "book"),
-    ("button", "reset_input"),
+    # "reset_input" is left out on purpose (user request); the entity stays
+    # available for own dashboards.
 )
 STAT_ENTITIES = (
     ("sensor", "total_cost"),
