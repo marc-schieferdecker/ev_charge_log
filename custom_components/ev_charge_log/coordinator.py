@@ -80,6 +80,7 @@ class VehicleInput:
     cost: float | None = None
     tariff_id: str | None = None
     charge_type: str = CHARGE_TYPE_AC
+    timestamp: datetime | None = None  # None: time of booking
 
 
 class EvChargeLogCoordinator:
@@ -249,7 +250,10 @@ class EvChargeLogCoordinator:
         self._async_notify()
 
     async def async_book_input(self, vehicle_id: str, now: datetime) -> Session:
-        """Book the dashboard input as a session, then reset the input."""
+        """Book the dashboard input as a session, then reset the input.
+
+        Without an entered time the session gets `now`.
+        """
         current = self.inputs[vehicle_id]
         if current.energy_kwh is None:
             raise ValidationError("energy_kwh is required")
@@ -258,7 +262,7 @@ class EvChargeLogCoordinator:
                 vehicle_id=vehicle_id,
                 energy_kwh=current.energy_kwh,
                 charge_type=current.charge_type,
-                timestamp=now,
+                timestamp=current.timestamp or now,
                 tariff_id=current.tariff_id,
                 cost=current.cost,
             )

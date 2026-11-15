@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.ev_charge_log.const import DOMAIN
@@ -401,6 +402,49 @@ async def test_book_dc_only_tariff_from_dashboard(hass: HomeAssistant, entry) ->
     session = entry.runtime_data.log.last_session("seal")
     assert session.charge_type == "dc"
     assert session.cost == 18.60
+
+
+async def test_book_with_entered_time(hass: HomeAssistant, entry) -> None:
+    time = _entity(hass, "datetime", "seal", "input_time")
+    assert hass.states.get(time).state == "unknown"
+
+    await hass.services.async_call(
+        "datetime",
+        "set_value",
+        {"entity_id": time, "datetime": "2026-11-14T18:30:00+00:00"},
+        blocking=True,
+    )
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_energy"), value=20
+    )
+    await _press(hass, _entity(hass, "button", "seal", "book"))
+
+    session = entry.runtime_data.log.last_session("seal")
+    assert session.timestamp == datetime(2026, 11, 14, 18, 30, tzinfo=UTC)
+    assert hass.states.get(time).state == "unknown"  # cleared after booking
+
+
+async def test_book_without_time_uses_now(hass: HomeAssistant, entry) -> None:
+    before = dt_util.utcnow()
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_energy"), value=20
+    )
+    await _press(hass, _entity(hass, "button", "seal", "book"))
+    session = entry.runtime_data.log.last_session("seal")
+    assert before <= session.timestamp <= dt_util.utcnow()
+
+
+async def test_reset_clears_time(hass: HomeAssistant, entry) -> None:
+    time = _entity(hass, "datetime", "seal", "input_time")
+    await hass.services.async_call(
+        "datetime",
+        "set_value",
+        {"entity_id": time, "datetime": "2026-11-14T18:30:00+00:00"},
+        blocking=True,
+    )
+    assert hass.states.get(time).state != "unknown"
+    await _press(hass, _entity(hass, "button", "seal", "reset_input"))
+    assert hass.states.get(time).state == "unknown"
 
 
 async def test_input_is_per_vehicle(hass: HomeAssistant, entry) -> None:
