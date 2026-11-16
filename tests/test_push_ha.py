@@ -87,9 +87,13 @@ async def test_charge_end_pushes_to_the_vehicles_phone_only(
 
     push = _last(phones["marc"])
     assert push["title"] == "Seal U has finished charging"
-    assert "Enter the kWh" in push["message"]
+    # Short hint that kWh and optionally the cost can be entered.
+    assert "kWh, optionally the cost, e.g. 12.4 or 12.4 7.32" in push["message"]
     data = push["data"]
     assert data["tag"] == "ev_charge_log_seal"
+    # Tapping the notification itself opens the panel (Android and iOS).
+    assert data["clickAction"] == "/ev-charge-log"
+    assert data["url"] == "/ev-charge-log"
     reply, open_panel = data["actions"]
     assert reply["action"] == "EV_CHARGE_LOG_KWH_seal"
     assert reply["behavior"] == "textInput"
@@ -221,3 +225,43 @@ async def test_vehicle_form_offers_phones(hass: HomeAssistant, entries, phones) 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     zoe = next(s for s in vehicles.subentries.values() if s.title == "Zoe")
     assert zoe.data["notify_services"] == ["mobile_app_pixel_frau"]
+
+
+async def test_reply_with_cost_overrides_tariff(
+    hass: HomeAssistant, entries, phones
+) -> None:
+    vehicles, _ = entries
+    await _charge(hass, SEAL_CHARGING)
+    await _reply(hass, "seal", "12,4 kWh 9,99 €")
+
+    session = vehicles.runtime_data.log.last_session("seal")
+    assert session.energy_kwh == 12.4
+    assert session.cost == 9.99
+    assert session.cost_overridden is True
+    assert session.tariff_id == "enbw"
+    assert _last(phones["marc"])["message"] == "Booked: 12.4 kWh, 9.99 EUR (EnBW)."
+
+
+async def test_reply_with_cost_zero(hass: HomeAssistant, entries, phones) -> None:
+    vehicles, _ = entries
+    await _charge(hass, SEAL_CHARGING)
+    await _reply(hass, "seal", "20 0")
+    session = vehicles.runtime_data.log.last_session("seal")
+    assert (session.energy_kwh, session.cost) == (20.0, 0.0)
+    assert session.cost_overridden is True
+
+
+async def test_confirmation_also_opens_panel(
+    hass: HomeAssistant, entries, phones
+) -> None:
+    await _charge(hass, SEAL_CHARGING)
+    await _reply(hass, "seal", "12,4")
+    assert _last(phones["marc"])["data"]["clickAction"] == "/ev-charge-log"
+
+
+async def test_german_texts(hass: HomeAssistant, entries, phones) -> None:
+    hass.config.language = "de"
+    await _charge(hass, SEAL_CHARGING)
+    push = _last(phones["marc"])
+    assert "„Eintragen“: kWh, optional mit Betrag" in push["message"]
+    assert push["data"]["actions"][0]["title"] == "Eintragen"

@@ -67,7 +67,7 @@ from .models import (
     ValidationError,
     Vehicle,
     cost_per_100,
-    parse_energy,
+    parse_reply,
 )
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
 
@@ -330,10 +330,17 @@ class EvChargeLogCoordinator:
     ) -> None:
         """Send a notification to the vehicle's phones (Companion app).
 
-        With `ask_kwh` it has a text input for the kWh and a button that
-        opens the panel. The tag makes a new notification replace the old.
+        With `ask_kwh` it has a text input for kWh (and optional cost) and a
+        button that opens the panel. Tapping the notification itself opens
+        the panel too (`clickAction` on Android, `url` on iOS). The tag makes
+        a new notification replace the old.
         """
-        data: dict[str, Any] = {"tag": self._push_tag(vehicle.id)}
+        panel = f"/{PANEL_URL_PATH}"
+        data: dict[str, Any] = {
+            "tag": self._push_tag(vehicle.id),
+            "clickAction": panel,
+            "url": panel,
+        }
         if ask_kwh:
             data["actions"] = [
                 {
@@ -344,7 +351,7 @@ class EvChargeLogCoordinator:
                 {
                     "action": "URI",
                     "title": await self._async_text("push_open"),
-                    "uri": f"/{PANEL_URL_PATH}",
+                    "uri": panel,
                 },
             ]
         await self._async_send(
@@ -388,10 +395,12 @@ class EvChargeLogCoordinator:
         )
 
     async def _async_book_reply(self, vehicle: Vehicle, text: str | None) -> None:
-        """Book the detected charge with the typed kWh and confirm it.
+        """Book the detected charge with the typed reply and confirm it.
 
-        Only a detected charge that is not booked yet can be booked this way,
-        so sending a reply twice never books twice.
+        The reply is kWh, optionally followed by the cost ("12,4 7,32"); a
+        cost overrides the tariff like everywhere else. Only a detected
+        charge that is not booked yet can be booked this way, so sending a
+        reply twice never books twice.
         """
         detected = self.detection.get(vehicle.id)
         if detected is None or detected.pending is None:
@@ -402,8 +411,8 @@ class EvChargeLogCoordinator:
                 ask_kwh=False,
             )
             return
-        energy = parse_energy(text)
-        if energy is None:
+        reply = parse_reply(text, self.hass.config.currency)
+        if reply is None:
             await self._async_push(
                 vehicle,
                 vehicle.name,
@@ -416,10 +425,11 @@ class EvChargeLogCoordinator:
             session = await self.async_add_session(
                 SessionInput(
                     vehicle_id=vehicle.id,
-                    energy_kwh=energy,
+                    energy_kwh=reply.energy_kwh,
                     charge_type=current.charge_type,
                     timestamp=dt_util.now(),
                     tariff_id=current.tariff_id,
+                    cost=reply.cost,
                 ),
                 timestamp_given=False,
                 clear_push=False,

@@ -11,6 +11,7 @@ from custom_components.ev_charge_log.models import (
     Fee,
     OdometerBaseline,
     PriceVersion,
+    Reply,
     Session,
     SessionInput,
     Tariff,
@@ -20,7 +21,7 @@ from custom_components.ev_charge_log.models import (
     cost_per_100,
     daily_totals,
     month_totals,
-    parse_energy,
+    parse_reply,
     round_money,
     soc_metrics,
     summarize,
@@ -505,27 +506,42 @@ def test_fee_tariff_from_dict() -> None:
     assert tariff.fee_end is None
 
 
-# --- typed kWh reply (stage 4 push) ---------------------------------------
+# --- typed reply: kWh and optional cost (stage 4 push) --------------------
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("12", 12.0),
-        ("12,4", 12.4),
-        ("12.4", 12.4),
-        (" 12,4 kWh ", 12.4),
-        ("40KWH", 40.0),
-        ("0", None),
+        ("12", Reply(12.0)),
+        ("12,4", Reply(12.4)),
+        ("12.4", Reply(12.4)),
+        (" 12,4 kWh ", Reply(12.4)),
+        ("40KWH", Reply(40.0)),
+        ("12,4 7,32", Reply(12.4, 7.32)),
+        ("12,4 kWh 7,32 €", Reply(12.4, 7.32)),
+        ("12,4kWh 7,32€", Reply(12.4, 7.32)),
+        ("12,4;7,32", Reply(12.4, 7.32)),
+        ("12,4 / 7,32", Reply(12.4, 7.32)),
+        ("12.4 7.32 EUR", Reply(12.4, 7.32)),
+        ("30 0", Reply(30.0, 0.0)),  # cost 0 is valid
+        ("0", None),  # kWh must be positive
+        ("0 5", None),
         ("", None),
         ("zwölf", None),
         ("12,4,5", None),
+        ("12,4 7,32 1", None),
         ("-3", None),
+        ("12,4 -1", None),
         (None, None),
     ],
 )
-def test_parse_energy(text: str | None, expected: float | None) -> None:
-    assert parse_energy(text) == expected
+def test_parse_reply(text: str | None, expected: Reply | None) -> None:
+    assert parse_reply(text) == expected
+
+
+def test_parse_reply_with_currency_code() -> None:
+    assert parse_reply("10 3,50 CHF", "CHF") == Reply(10.0, 3.5)
+    assert parse_reply("10 3,50 SEK", "SEK") == Reply(10.0, 3.5)
 
 
 # --- daily totals for the panel chart -------------------------------------

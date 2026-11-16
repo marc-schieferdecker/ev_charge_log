@@ -19,15 +19,38 @@ class ValidationError(ValueError):
     """Raised when input data violates the data model rules."""
 
 
-_ENERGY_TEXT = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(?:kwh)?\s*$", re.IGNORECASE)
+_NUMBER = re.compile(r"^\d+(?:[.,]\d+)?$")
+_REPLY_SEPARATORS = re.compile(r"[\s;/]+")
+_REPLY_UNITS = ("kwh", "€", "$", "£", "eur", "usd", "gbp", "chf")
 
 
-def parse_energy(text: str | None) -> float | None:
-    """kWh from a typed reply ("12,4", "12.4", "12 kWh"); None if invalid."""
-    if text is None or (match := _ENERGY_TEXT.match(text)) is None:
+@dataclass(frozen=True, slots=True)
+class Reply:
+    """A typed reply from a phone notification: kWh and optional cost."""
+
+    energy_kwh: float
+    cost: float | None = None
+
+
+def parse_reply(text: str | None, currency: str | None = None) -> Reply | None:
+    """Parse "12,4" or "12,4 7,32" (kWh, optional cost); None if invalid.
+
+    Numbers may use a decimal comma or point. Separators: space, ";" or "/"
+    (not ",", that is the decimal comma). Units ("kWh", "€", the currency
+    code) are ignored. kWh must be positive, the cost may be 0.
+    """
+    if text is None:
         return None
-    value = float(match.group(1).replace(",", "."))
-    return value if value > 0 else None
+    cleaned = text.lower()
+    for unit in (*_REPLY_UNITS, *([currency.lower()] if currency else [])):
+        cleaned = cleaned.replace(unit, " ")
+    parts = [p for p in _REPLY_SEPARATORS.split(cleaned) if p]
+    if not 1 <= len(parts) <= 2 or not all(_NUMBER.match(p) for p in parts):
+        return None
+    energy, *rest = (float(p.replace(",", ".")) for p in parts)
+    if energy <= 0:
+        return None
+    return Reply(energy, rest[0] if rest else None)
 
 
 def round_money(value: float) -> float:

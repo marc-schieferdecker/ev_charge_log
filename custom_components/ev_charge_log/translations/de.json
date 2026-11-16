@@ -80,7 +80,7 @@
       "step": {
         "user": {
           "title": "Tarif hinzufügen",
-          "description": "Preise in {currency} pro kWh. Ein Preis von 0 ist erlaubt, z. B. für kostenloses Laden beim Arbeitgeber oder mit eigenem Solarstrom.",
+          "description": "Preise in {currency} pro kWh. Ein Preis von 0 ist erlaubt, z.B. für kostenloses Laden beim Arbeitgeber oder mit eigenem Solarstrom.",
           "data": {
             "name": "Name",
             "price_ac": "Preis AC",
@@ -98,7 +98,7 @@
             "monthly_fee": "Optional. Wird für jeden angefangenen Monat automatisch gebucht und fließt in Gesamtkosten und Durchschnittspreis des Fahrzeugs ein.",
             "fee_vehicle_id": "Bei Grundgebühr Pflicht: das Fahrzeug, dem sie zugerechnet wird.",
             "fee_start": "Bei Grundgebühr Pflicht: erster Monat (beliebiger Tag im Monat).",
-            "fee_end": "Optional, z. B. nach einer Kündigung: letzter Monat, der berechnet wird."
+            "fee_end": "Optional, z.B. nach einer Kündigung: letzter Monat, der berechnet wird."
           }
         },
         "reconfigure": {
@@ -152,7 +152,7 @@
             "monthly_fee": "Optional. Wird für jeden angefangenen Monat automatisch gebucht und fließt in Gesamtkosten und Durchschnittspreis des Fahrzeugs ein.",
             "fee_vehicle_id": "Bei Grundgebühr Pflicht: das Fahrzeug, dem sie zugerechnet wird.",
             "fee_start": "Bei Grundgebühr Pflicht: erster Monat (beliebiger Tag im Monat).",
-            "fee_end": "Optional, z. B. nach einer Kündigung: letzter Monat, der berechnet wird."
+            "fee_end": "Optional, z.B. nach einer Kündigung: letzter Monat, der berechnet wird."
           }
         }
       },
@@ -210,11 +210,11 @@
     }
   },
   "exceptions": {
-    "push_message": { "message": "Ladung beendet um {time}, SoC {soc_start} % → {soc_end} %, Tarif: {tariff}. kWh vom Beleg eingeben, um sie zu buchen." },
-    "push_reply": { "message": "kWh eingeben" },
+    "push_message": { "message": "Ladung beendet um {time}, SoC {soc_start} % → {soc_end} %, Tarif: {tariff}.\n„Eintragen“: kWh, optional mit Betrag, z.B. 12,4 oder 12,4 7,32" },
+    "push_reply": { "message": "Eintragen" },
     "push_open": { "message": "Öffnen" },
     "push_booked": { "message": "Gebucht: {energy} kWh, {cost} {currency} ({tariff})." },
-    "push_invalid": { "message": "„{text}“ ist keine gültige kWh-Angabe. Bitte noch einmal, z. B. 12,4" },
+    "push_invalid": { "message": "„{text}“ wurde nicht verstanden. Bitte kWh eingeben, optional mit Betrag, z.B. 12,4 oder 12,4 7,32" },
     "push_failed": { "message": "Nicht gebucht: {error}. Bitte den Tarif in der App prüfen." },
     "push_already_booked": { "message": "Diese Ladung ist bereits gebucht." },
     "panel_empty": { "message": "Noch keine Fahrzeuge. Lege deine Fahrzeuge und Tarife in den Einstellungen der Integration an." },

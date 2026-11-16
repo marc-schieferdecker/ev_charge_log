@@ -210,11 +210,11 @@
     }
   },
   "exceptions": {
-    "push_message": { "message": "Charging ended at {time}, SoC {soc_start} % → {soc_end} %, tariff: {tariff}. Enter the kWh from the receipt to book it." },
-    "push_reply": { "message": "Enter kWh" },
+    "push_message": { "message": "Charging ended at {time}, SoC {soc_start} % → {soc_end} %, tariff: {tariff}.\n\"Log\": kWh, optionally the cost, e.g. 12.4 or 12.4 7.32" },
+    "push_reply": { "message": "Log" },
     "push_open": { "message": "Open" },
     "push_booked": { "message": "Booked: {energy} kWh, {cost} {currency} ({tariff})." },
-    "push_invalid": { "message": "\"{text}\" is not a valid amount of kWh. Please try again, e.g. 12.4" },
+    "push_invalid": { "message": "\"{text}\" was not understood. Please enter kWh, optionally the cost, e.g. 12.4 or 12.4 7.32" },
     "push_failed": { "message": "Not booked: {error}. Please check the tariff in the app." },
     "push_already_booked": { "message": "This charge has already been booked." },
     "panel_empty": { "message": "No vehicles yet. Add your vehicles and tariffs in the integration settings." },

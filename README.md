@@ -81,9 +81,11 @@ Assign to a vehicle:
 - **Zones without reminder** – e.g. your home zone, if you don't want to be
   reminded there.
 - **Notify phones** – phones with the Home Assistant Companion app. Each
-  vehicle can notify different phones. In the notification you can type
-  the kWh from the receipt and the session is booked right away with the
-  preselected tariff (built for Android; iOS may differ).
+  vehicle can notify different phones. Expand the notification and tap
+  **Log** to type the kWh from the receipt, optionally followed by the cost
+  (e.g. `12.4` or `12.4 7.32`); the session is booked right away with the
+  preselected tariff. Tapping the notification itself opens the Charging
+  log page (built for Android; iOS may differ).
 
 `unavailable`/`unknown` states are ignored, and a restart of Home Assistant
 does not count as a new charge.
