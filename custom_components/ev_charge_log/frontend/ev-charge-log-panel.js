@@ -484,7 +484,12 @@ class EvChargeLogPanel extends HTMLElement {
       const statsCard = helpers.createCardElement({
         type: "entities",
         title: `${vehicle.name} · ${data.texts.panel_stats}`,
-        entities: vehicle.stats.map(row),
+        entities: [
+          ...vehicle.stats.map(row),
+          ...(vehicle.last.length
+            ? [{ type: "section", label: data.texts.panel_last }, ...vehicle.last.map(row)]
+            : []),
+        ],
       });
       statsCard.hass = this._hass;
       this._cards.push(statsCard);

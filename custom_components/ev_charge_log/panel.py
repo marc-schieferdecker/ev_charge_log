@@ -55,6 +55,10 @@ STAT_ENTITIES = (
     ("sensor", "average_price"),
     # Instead of the number of sessions (user request); that sensor stays.
     ("sensor", "cost_per_100"),
+)
+# Shown in an own section "Last session" of the statistics card, with the
+# short `panel_label_*` names.
+LAST_ENTITIES = (
     ("sensor", "last_session_time"),
     ("sensor", "last_session_cost"),
     ("sensor", "last_session_energy"),
@@ -67,6 +71,7 @@ TEXT_KEYS = (
     "panel_booked",
     "panel_reload",
     "panel_stats",
+    "panel_last",
     "panel_chart_energy",
     "panel_chart_cost",
     "panel_sessions",
@@ -290,6 +295,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "input": entities(vehicle.id, INPUT_ENTITIES),
                     "book": next(iter(entities(vehicle.id, (BOOK_ENTITY,))), None),
                     "stats": entities(vehicle.id, STAT_ENTITIES),
+                    "last": entities(vehicle.id, LAST_ENTITIES),
                     "history": vehicle_history(coord, vehicle.id, current_month),
                     "sessions": sessions(vehicle.id),
                     # The panel redraws the chart when one of these changes.
