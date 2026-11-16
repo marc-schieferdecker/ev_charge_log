@@ -129,3 +129,25 @@ list_sessions:
     end:
       selector:
         datetime:
+
+set_odometer_start:
+  fields:
+    vehicle:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: ev_charge_log
+              model_id: vehicle
+    odometer:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 9999999
+          step: 1
+          mode: box
+    since:
+      required: true
+      selector:
+        date:

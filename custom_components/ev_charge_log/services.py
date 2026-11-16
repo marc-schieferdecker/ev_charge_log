@@ -27,6 +27,7 @@ SERVICE_ADD = "add_session"
 SERVICE_UPDATE = "update_session"
 SERVICE_DELETE = "delete_session"
 SERVICE_LIST = "list_sessions"
+SERVICE_ODOMETER = "set_odometer_start"
 
 _NUMBER = vol.Coerce(float)
 _SESSION_FIELDS = {
@@ -61,6 +62,13 @@ DELETE_SCHEMA = vol.Schema(
     {
         vol.Required("vehicle"): cv.string,
         vol.Optional("session_id"): cv.string,
+    }
+)
+ODOMETER_SCHEMA = vol.Schema(
+    {
+        vol.Required("vehicle"): cv.string,
+        vol.Required("odometer"): _NUMBER,
+        vol.Required("since"): cv.date,
     }
 )
 LIST_SCHEMA = vol.Schema(
@@ -219,6 +227,31 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
         return {"sessions": [_to_response(coord, s) for s in sessions]}
 
+    async def set_odometer_start(call: ServiceCall) -> ServiceResponse:
+        coord = _coordinator(hass)
+        data = call.data
+        vehicle_id = _subentry_of_device(
+            hass, data["vehicle"], coord.vehicles, "vehicle"
+        )
+        try:
+            baseline = await coord.async_set_odometer_start(
+                vehicle_id, data["odometer"], data["since"]
+            )
+        except ValidationError as err:
+            raise _error("invalid_odometer", error=str(err)) from err
+        return {
+            "odometer": baseline.start,
+            "since": baseline.since.isoformat(),
+            "cost_per_100": coord.cost_per_100(vehicle_id),
+        }
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ODOMETER,
+        set_odometer_start,
+        ODOMETER_SCHEMA,
+        SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(
         DOMAIN, SERVICE_ADD, add_session, ADD_SCHEMA, SupportsResponse.OPTIONAL
     )
@@ -235,5 +268,11 @@ def async_register_services(hass: HomeAssistant) -> None:
 
 def async_unregister_services(hass: HomeAssistant) -> None:
     """Remove the actions."""
-    for service in (SERVICE_ADD, SERVICE_UPDATE, SERVICE_DELETE, SERVICE_LIST):
+    for service in (
+        SERVICE_ADD,
+        SERVICE_UPDATE,
+        SERVICE_DELETE,
+        SERVICE_LIST,
+        SERVICE_ODOMETER,
+    ):
         hass.services.async_remove(DOMAIN, service)

@@ -259,7 +259,8 @@
     "session_not_found": { "message": "No matching session found for this vehicle." },
     "invalid_session": { "message": "The session could not be saved: {error}" },
     "energy_required": { "message": "Please enter the charged energy first." },
-    "cost_conflict": { "message": "Use either a cost or \"Clear cost\", not both." }
+    "cost_conflict": { "message": "Use either a cost or \"Clear cost\", not both." },
+    "invalid_odometer": { "message": "The odometer start could not be set: {error}" }
   },
   "services": {
     "add_session": {
@@ -311,6 +312,15 @@
         "vehicle": { "name": "Vehicle", "description": "Only sessions of this vehicle." },
         "start": { "name": "From", "description": "Only sessions at or after this time." },
         "end": { "name": "Until", "description": "Only sessions at or before this time." }
+      }
+    },
+    "set_odometer_start": {
+      "name": "Set odometer start",
+      "description": "Sets the start point of the cost per 100 km: the odometer reading on a day from which on all paid sessions are recorded. Use it if you entered older sessions afterwards.",
+      "fields": {
+        "vehicle": { "name": "Vehicle", "description": "Vehicle with an odometer sensor." },
+        "odometer": { "name": "Odometer", "description": "Odometer reading on that day, in the length unit of Home Assistant (km or mi)." },
+        "since": { "name": "From", "description": "Sessions from this day on count, e.g. the day of delivery or of the first recorded session." }
       }
     }
   }

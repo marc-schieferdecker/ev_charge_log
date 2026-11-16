@@ -136,3 +136,81 @@ async def test_panel_name_in_german(hass: HomeAssistant) -> None:
     result = await async_panel_data(hass)
     seal = next(v for v in result["vehicles"] if v["id"] == "seal")
     assert "Kosten pro 100 km" in [row["name"] for row in seal["stats"]]
+
+
+# --- set_odometer_start action -------------------------------------------------
+
+
+def _device(hass: HomeAssistant, vehicle: str) -> str:
+    entity = er.async_get(hass).async_get_entity_id("button", DOMAIN, f"{vehicle}_book")
+    return er.async_get(hass).async_get(entity).device_id
+
+
+async def test_set_odometer_start_counts_older_sessions(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    from datetime import datetime
+
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    vehicles = await _setup(hass, odometer="15000")
+    coord = vehicles.runtime_data
+    tz = dt_util.get_default_time_zone()
+    # Recorded afterwards: sessions before the automatic baseline.
+    await _book(coord, 40.0, datetime(2026, 9, 1, 8, tzinfo=tz))  # 23.60
+    await _book(coord, 20.0, datetime(2026, 8, 31, 23, tzinfo=tz))  # before start
+    hass.states.async_set(ODOMETER, "15100", {"unit_of_measurement": "km"})
+    await hass.async_block_till_done()
+
+    result = await hass.services.async_call(
+        DOMAIN,
+        "set_odometer_start",
+        {"vehicle": _device(hass, "seal"), "odometer": 14000, "since": "2026-09-01"},
+        blocking=True,
+        return_response=True,
+    )
+    # 23.60 over 1100 km -> 2.15 per 100 km; the session of Aug 31 does not count
+    assert result["cost_per_100"] == 2.15
+    assert result["since"] == "2026-09-01T00:00:00+02:00"
+    await hass.async_block_till_done()
+    assert hass.states.get(_entity(hass, "seal")).state == "2.15"
+    assert hass_storage[STORAGE_KEY]["data"]["odometer"]["seal"]["start"] == 14000.0
+
+
+async def test_set_odometer_start_above_current_is_rejected(
+    hass: HomeAssistant,
+) -> None:
+    from homeassistant.exceptions import ServiceValidationError
+
+    await _setup(hass, odometer="15000")
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            DOMAIN,
+            "set_odometer_start",
+            {
+                "vehicle": _device(hass, "seal"),
+                "odometer": 16000,
+                "since": "2026-09-01",
+            },
+            blocking=True,
+        )
+    assert err.value.translation_key == "invalid_odometer"
+
+
+async def test_set_odometer_start_without_sensor_is_rejected(
+    hass: HomeAssistant,
+) -> None:
+    from homeassistant.exceptions import ServiceValidationError
+
+    await _setup(hass)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            DOMAIN,
+            "set_odometer_start",
+            {
+                "vehicle": _device(hass, "dolphin"),
+                "odometer": 10,
+                "since": "2026-09-01",
+            },
+            blocking=True,
+        )
+    assert err.value.translation_key == "invalid_odometer"

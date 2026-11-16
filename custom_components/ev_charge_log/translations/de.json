@@ -259,7 +259,8 @@
     "session_not_found": { "message": "Für dieses Fahrzeug wurde keine passende Ladung gefunden." },
     "invalid_session": { "message": "Die Ladung konnte nicht gespeichert werden: {error}" },
     "energy_required": { "message": "Bitte zuerst die geladene Energie eingeben." },
-    "cost_conflict": { "message": "Entweder einen Betrag angeben oder „Betrag entfernen“ wählen, nicht beides." }
+    "cost_conflict": { "message": "Entweder einen Betrag angeben oder „Betrag entfernen“ wählen, nicht beides." },
+    "invalid_odometer": { "message": "Der Kilometerstand-Start konnte nicht gesetzt werden: {error}" }
   },
   "services": {
     "add_session": {
@@ -311,6 +312,15 @@
         "vehicle": { "name": "Fahrzeug", "description": "Nur Ladungen dieses Fahrzeugs." },
         "start": { "name": "Von", "description": "Nur Ladungen ab diesem Zeitpunkt." },
         "end": { "name": "Bis", "description": "Nur Ladungen bis zu diesem Zeitpunkt." }
+      }
+    },
+    "set_odometer_start": {
+      "name": "Kilometerstand-Start setzen",
+      "description": "Setzt den Startpunkt für die Kosten pro 100 km: den Kilometerstand an einem Tag, ab dem alle bezahlten Ladungen erfasst sind. Nützlich, wenn ältere Ladungen nachgetragen wurden.",
+      "fields": {
+        "vehicle": { "name": "Fahrzeug", "description": "Fahrzeug mit Kilometerstand-Sensor." },
+        "odometer": { "name": "Kilometerstand", "description": "Kilometerstand an diesem Tag, in der Längeneinheit von Home Assistant (km oder mi)." },
+        "since": { "name": "Ab", "description": "Ladungen ab diesem Tag zählen, z.B. der Tag der Übergabe oder der ersten erfassten Ladung." }
       }
     }
   }

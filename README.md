@@ -161,6 +161,7 @@ Per tariff: total cost (including its monthly fees) and total energy.
 | `ev_charge_log.update_session` | Correct a session, by default the vehicle's last one |
 | `ev_charge_log.delete_session` | Delete a session, by default the vehicle's last one |
 | `ev_charge_log.list_sessions` | Return sessions as response data, filtered by vehicle and time |
+| `ev_charge_log.set_odometer_start` | Set the start of the cost per 100 km (odometer reading on a day), e.g. after entering older sessions |
 
 Example:
 

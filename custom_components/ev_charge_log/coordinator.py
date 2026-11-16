@@ -252,6 +252,35 @@ class EvChargeLogCoordinator:
         )
         return True
 
+    async def async_set_odometer_start(
+        self, vehicle_id: str, start: float, since: date
+    ) -> OdometerBaseline:
+        """Set the start point of the cost per 100 km by hand.
+
+        `start` is the odometer reading (HA length unit) at the beginning of
+        `since` (local time); sessions from that day on count.
+        """
+        self._require_vehicle(vehicle_id)
+        vehicle = self.vehicles[vehicle_id]
+        if not vehicle.odometer_entity_id:
+            raise ValidationError("the vehicle has no odometer sensor")
+        if start < 0:
+            raise ValidationError("odometer reading must not be negative")
+        reading = self.odometer_reading(vehicle)
+        if reading is not None and start > reading:
+            raise ValidationError(
+                f"odometer reading {start:g} is above the current reading {reading:g}"
+            )
+        midnight = datetime.combine(since, datetime.min.time())
+        baseline = OdometerBaseline(
+            vehicle.odometer_entity_id,
+            float(start),
+            midnight.replace(tzinfo=dt_util.get_default_time_zone()),
+        )
+        self.odometer[vehicle_id] = baseline
+        await self._async_commit()
+        return baseline
+
     async def async_odometer_changed(self, vehicle_id: str) -> None:
         """Called by the sensor; sets the baseline once a value is valid."""
         if vehicle_id in self.vehicles and self._set_odometer_baseline(vehicle_id):
