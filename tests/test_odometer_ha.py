@@ -193,7 +193,7 @@ async def test_set_odometer_start_above_current_is_rejected(
             },
             blocking=True,
         )
-    assert err.value.translation_key == "invalid_odometer"
+    assert err.value.translation_key == "error_odometer_above"
 
 
 async def test_set_odometer_start_without_sensor_is_rejected(
@@ -213,4 +213,4 @@ async def test_set_odometer_start_without_sensor_is_rejected(
             },
             blocking=True,
         )
-    assert err.value.translation_key == "invalid_odometer"
+    assert err.value.translation_key == "error_no_odometer"

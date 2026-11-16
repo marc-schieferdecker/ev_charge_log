@@ -86,6 +86,51 @@ const STYLE = `
     color: var(--secondary-text-color);
     margin-top: 2px;
   }
+  .reload-hint {
+    margin: 16px 16px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--warning-color, #ff9800);
+    color: var(--text-primary-color, #fff);
+  }
+  .book {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end; /* right-aligned, only as wide as its text */
+    gap: 4px;
+    padding: 0 16px 8px;
+  }
+  .book-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px 8px 14px;
+    border: none;
+    border-radius: 20px;
+    background: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .book-button ha-icon {
+    --mdc-icon-size: 18px;
+  }
+  .book-button:hover {
+    filter: brightness(1.08);
+  }
+  .book-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .book-error {
+    color: var(--error-color);
+    font-size: 13px;
+    text-align: right;
+  }
+  .book-error:empty {
+    display: none;
+  }
   .list-card {
     padding: 16px 0 8px;
   }
@@ -246,6 +291,8 @@ const STYLE = `
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DOMAIN = "ev_charge_log";
+// Version of this module, from "?v=<version>" in its URL (see panel.py).
+const MODULE_VERSION = new URL(import.meta.url).searchParams.get("v");
 const PAGE_SIZE = 5;
 
 class EvChargeLogPanel extends HTMLElement {
@@ -400,6 +447,14 @@ class EvChargeLogPanel extends HTMLElement {
       return;
     }
 
+    // The browser may still run an older panel module after an update.
+    if (data.version && MODULE_VERSION && data.version !== MODULE_VERSION) {
+      const hint = document.createElement("div");
+      hint.className = "reload-hint";
+      hint.textContent = data.texts.panel_reload;
+      this.shadowRoot.insertBefore(hint, content);
+    }
+
     content.className = "content";
     // Short row names; without a name the entity's own name is used.
     const row = (r) => (r.name ? { entity: r.entity, name: r.name } : r.entity);
@@ -411,26 +466,86 @@ class EvChargeLogPanel extends HTMLElement {
       this._fillChartCard(chart, vehicle, data);
       this._charts.set(vehicle.id, chart);
 
-      const card = helpers.createCardElement({
+      // Input card: the entities card inside our frame, with the own "book"
+      // button (right-aligned) below the input fields.
+      const card = document.createElement("ha-card");
+      const inputCard = helpers.createCardElement({
         type: "entities",
-        title: vehicle.name,
-        entities: [
-          { type: "section", label: data.texts.panel_input },
-          ...vehicle.input.map(row),
-          { type: "section", label: data.texts.panel_stats },
-          ...vehicle.stats.map(row),
-        ],
+        title: `${vehicle.name} · ${data.texts.panel_input}`,
+        entities: vehicle.input.map(row),
       });
-      card.hass = this._hass;
-      this._cards.push(card);
+      this._embedCard(inputCard);
+      inputCard.hass = this._hass;
+      this._cards.push(inputCard);
+      card.appendChild(inputCard);
+      if (vehicle.book) card.appendChild(this._bookButton(vehicle, data));
+
+      // Statistics: an own, ordinary entities card.
+      const statsCard = helpers.createCardElement({
+        type: "entities",
+        title: `${vehicle.name} · ${data.texts.panel_stats}`,
+        entities: vehicle.stats.map(row),
+      });
+      statsCard.hass = this._hass;
+      this._cards.push(statsCard);
 
       const list = document.createElement("ha-card");
       this._fillSessionList(list, vehicle, data);
       this._lists.set(vehicle.id, list);
 
-      column.append(chart, card, list);
+      column.append(chart, card, statsCard, list);
       content.appendChild(column);
     }
+  }
+
+  _embedCard(card) {
+    // A card inside our frame: no own border, shadow or background. The
+    // ha-card theme variables reach into the card's shadow DOM. Not
+    // --card-background-color: dropdown menus use it as their background.
+    card.style.setProperty("--ha-card-border-width", "0");
+    card.style.setProperty("--ha-card-box-shadow", "none");
+    card.style.setProperty("--ha-card-background", "transparent");
+  }
+
+  _bookButton(vehicle, data) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "book";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "book-button";
+    const icon = document.createElement("ha-icon");
+    icon.icon = "mdi:lightning-bolt";
+    const label = document.createElement("span");
+    const name = vehicle.book.name || "Book";
+    label.textContent = name;
+    button.append(icon, label);
+    const error = document.createElement("div");
+    error.className = "book-error";
+
+    button.addEventListener("click", async () => {
+      error.textContent = "";
+      button.disabled = true;
+      try {
+        await this._hass.callService(
+          "button",
+          "press",
+          { entity_id: vehicle.book.entity },
+          undefined,
+          false
+        );
+        // Short confirmation on the button itself.
+        label.textContent = `✓ ${data.texts.panel_booked}`;
+        setTimeout(() => {
+          label.textContent = name;
+        }, 2000);
+      } catch (err) {
+        error.textContent = this._errorText(err);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    wrapper.append(button, error);
+    return wrapper;
   }
 
   // --- session list and edit dialog ---------------------------------------------
@@ -638,7 +753,7 @@ class EvChargeLogPanel extends HTMLElement {
         close();
         await this._refreshData();
       } catch (err) {
-        error.textContent = (err && err.message) || String(err);
+        error.textContent = this._errorText(err);
       } finally {
         for (const b of [deleteButton, cancelButton, saveButton]) b.disabled = false;
       }
@@ -694,6 +809,20 @@ class EvChargeLogPanel extends HTMLElement {
 
     root.appendChild(overlay);
     energyInput.focus();
+  }
+
+  _errorText(err) {
+    // HA sends errors of actions in English plus a translation key; show
+    // our translated message (with its placeholders) when we know the key.
+    const key = err && err.translation_key;
+    const template = key && this._data && this._data.errors && this._data.errors[key];
+    if (template) {
+      const placeholders = (err && err.translation_placeholders) || {};
+      return template.replace(/\{(\w+)\}/g, (match, name) =>
+        name in placeholders ? String(placeholders[name]) : match
+      );
+    }
+    return (err && err.message) || String(err);
   }
 
   _parse(text) {

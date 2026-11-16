@@ -204,7 +204,9 @@ class SessionLog:
             new = replace(new, cost=round_money(cost), cost_overridden=True)
         elif cost is None or not new.cost_overridden:
             if new.price_per_kwh is None:
-                raise ValidationError("either a cost or a tariff is required")
+                raise ValidationError(
+                    "either a cost or a tariff is required", "cost_or_tariff"
+                )
             new = replace(
                 new,
                 cost=round_money(new.energy_kwh * new.price_per_kwh),
@@ -276,7 +278,9 @@ def _lookup_tariff(
     try:
         return tariffs[tariff_id]
     except KeyError:
-        raise ValidationError(f"unknown tariff: {tariff_id}") from None
+        raise ValidationError(
+            f"unknown tariff: {tariff_id}", "unknown_tariff", tariff=tariff_id
+        ) from None
 
 
 def migrate(old_major: int, old_minor: int, data: dict[str, Any]) -> dict[str, Any]:

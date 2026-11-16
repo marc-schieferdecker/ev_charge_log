@@ -49,8 +49,8 @@ class BookButton(EvChargeLogEntity, ButtonEntity):
         except ValidationError as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="invalid_session",
-                translation_placeholders={"error": str(err)},
+                translation_key=err.key,
+                translation_placeholders=err.placeholders or None,
             ) from err
 
 

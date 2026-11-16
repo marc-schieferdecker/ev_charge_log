@@ -16,7 +16,18 @@ from .const import CHARGE_TYPE_DC, CHARGE_TYPES, SOURCE_MANUAL, SOURCES
 
 
 class ValidationError(ValueError):
-    """Raised when input data violates the data model rules."""
+    """Raised when input data violates the data model rules.
+
+    `key` is the translation key ("error_<key>" in the "exceptions" category
+    of the translations), `placeholders` fill its message. The English
+    message stays for logs.
+    """
+
+    def __init__(self, message: str, key: str, **placeholders: Any) -> None:
+        """Create the error."""
+        super().__init__(message)
+        self.key = f"error_{key}"
+        self.placeholders = {name: str(value) for name, value in placeholders.items()}
 
 
 _NUMBER = re.compile(r"^\d+(?:[.,]\d+)?$")
@@ -60,7 +71,7 @@ def round_money(value: float) -> float:
 
 def _require_non_negative(name: str, value: float | None) -> None:
     if value is not None and value < 0:
-        raise ValidationError(f"{name} must not be negative")
+        raise ValidationError(f"{name} must not be negative", f"negative_{name}")
 
 
 def _optional_float(value: Any) -> float | None:
@@ -87,7 +98,7 @@ class Vehicle:
     def __post_init__(self) -> None:
         """Validate the vehicle."""
         if self.battery_capacity_kwh is not None and self.battery_capacity_kwh <= 0:
-            raise ValidationError("battery_capacity_kwh must be positive")
+            raise ValidationError("battery_capacity_kwh must be positive", "capacity")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Vehicle:
@@ -108,7 +119,9 @@ class Vehicle:
 
 def _validate_prices(price_ac: float | None, price_dc: float | None) -> None:
     if price_ac is None and price_dc is None:
-        raise ValidationError("a price version needs an AC or a DC price")
+        raise ValidationError(
+            "a price version needs an AC or a DC price", "price_required"
+        )
     _require_non_negative("price_ac", price_ac)
     _require_non_negative("price_dc", price_dc)
 
@@ -197,10 +210,12 @@ class Tariff:
         _validate_prices(self.price_ac, self.price_dc)
         _require_non_negative("monthly_fee", self.monthly_fee)
         if self.fee_start and self.fee_end and self.fee_end < self.fee_start:
-            raise ValidationError("fee_end is before fee_start")
+            raise ValidationError("fee_end is before fee_start", "fee_end_before_start")
         days = [v.valid_from for v in self.versions]
         if len(days) != len(set(days)):
-            raise ValidationError("two price versions with the same date")
+            raise ValidationError(
+                "two price versions with the same date", "duplicate_version"
+            )
         object.__setattr__(
             self, "versions", tuple(sorted(self.versions, key=lambda v: v.valid_from))
         )
@@ -224,7 +239,10 @@ class Tariff:
         price = self._price(charge_type, day)
         if price is None:
             raise ValidationError(
-                f"tariff {self.name} has no {charge_type.upper()} price"
+                f"tariff {self.name} has no {charge_type.upper()} price",
+                "no_price",
+                tariff=self.name,
+                charge_type=charge_type.upper(),
             )
         return price
 
@@ -343,19 +361,27 @@ class Session:
             if value is not None:
                 object.__setattr__(self, name, float(value))
         if self.timestamp.tzinfo is None:
-            raise ValidationError("timestamp must be timezone-aware")
+            raise ValidationError("timestamp must be timezone-aware", "timestamp")
         if self.energy_kwh <= 0:
-            raise ValidationError("energy_kwh must be positive")
+            raise ValidationError("energy_kwh must be positive", "energy")
         if self.charge_type not in CHARGE_TYPES:
-            raise ValidationError(f"invalid charge_type: {self.charge_type}")
+            raise ValidationError(
+                f"invalid charge_type: {self.charge_type}",
+                "charge_type",
+                charge_type=self.charge_type,
+            )
         if self.source not in SOURCES:
-            raise ValidationError(f"invalid source: {self.source}")
+            raise ValidationError(
+                f"invalid source: {self.source}", "source", source=self.source
+            )
         _require_non_negative("cost", self.cost)
         _require_non_negative("price_per_kwh", self.price_per_kwh)
         for name in ("soc_start", "soc_end"):
             value = getattr(self, name)
             if value is not None and not 0 <= value <= 100:
-                raise ValidationError(f"{name} must be between 0 and 100")
+                raise ValidationError(
+                    f"{name} must be between 0 and 100", f"{name}_range"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for storage."""
@@ -422,9 +448,13 @@ def calculate_cost(
     charge type.
     """
     if charge_type not in CHARGE_TYPES:
-        raise ValidationError(f"invalid charge_type: {charge_type}")
+        raise ValidationError(
+            f"invalid charge_type: {charge_type}",
+            "charge_type",
+            charge_type=charge_type,
+        )
     if energy_kwh <= 0:
-        raise ValidationError("energy_kwh must be positive")
+        raise ValidationError("energy_kwh must be positive", "energy")
     _require_non_negative("cost", cost)
 
     price = tariff.price_for(charge_type, day) if tariff is not None else None
@@ -432,7 +462,7 @@ def calculate_cost(
     if cost is not None:
         return CostResult(round_money(cost), price, cost_overridden=True)
     if price is None:
-        raise ValidationError("either a cost or a tariff is required")
+        raise ValidationError("either a cost or a tariff is required", "cost_or_tariff")
     return CostResult(round_money(energy_kwh * price), price, cost_overridden=False)
 
 
@@ -618,7 +648,9 @@ def build_session(
 ) -> Session:
     """Book a session: calculate and freeze the cost."""
     if data.tariff_id is not None and (tariff is None or tariff.id != data.tariff_id):
-        raise ValidationError(f"unknown tariff: {data.tariff_id}")
+        raise ValidationError(
+            f"unknown tariff: {data.tariff_id}", "unknown_tariff", tariff=data.tariff_id
+        )
     result = calculate_cost(
         data.energy_kwh, data.charge_type, tariff, data.cost, data.timestamp.date()
     )

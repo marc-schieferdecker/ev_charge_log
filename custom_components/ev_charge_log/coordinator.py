@@ -263,13 +263,18 @@ class EvChargeLogCoordinator:
         self._require_vehicle(vehicle_id)
         vehicle = self.vehicles[vehicle_id]
         if not vehicle.odometer_entity_id:
-            raise ValidationError("the vehicle has no odometer sensor")
+            raise ValidationError("the vehicle has no odometer sensor", "no_odometer")
         if start < 0:
-            raise ValidationError("odometer reading must not be negative")
+            raise ValidationError(
+                "odometer reading must not be negative", "odometer_negative"
+            )
         reading = self.odometer_reading(vehicle)
         if reading is not None and start > reading:
             raise ValidationError(
-                f"odometer reading {start:g} is above the current reading {reading:g}"
+                f"odometer reading {start:g} is above the current reading {reading:g}",
+                "odometer_above",
+                start=f"{start:g}",
+                reading=f"{reading:g}",
             )
         midnight = datetime.combine(since, datetime.min.time())
         baseline = OdometerBaseline(
@@ -467,7 +472,10 @@ class EvChargeLogCoordinator:
             await self._async_push(
                 vehicle,
                 vehicle.name,
-                await self._async_text("push_failed", error=str(err)),
+                await self._async_text(
+                    "push_failed",
+                    error=await self._async_text(err.key, **err.placeholders),
+                ),
                 ask_kwh=True,
             )
             return
@@ -857,7 +865,7 @@ class EvChargeLogCoordinator:
         """
         current = self.inputs[vehicle_id]
         if current.energy_kwh is None:
-            raise ValidationError("energy_kwh is required")
+            raise ValidationError("energy_kwh is required", "energy_required")
         timestamp = (
             now
             if current.day is None
@@ -881,4 +889,6 @@ class EvChargeLogCoordinator:
 
     def _require_vehicle(self, vehicle_id: str) -> None:
         if vehicle_id not in self.vehicles:
-            raise ValidationError(f"unknown vehicle: {vehicle_id}")
+            raise ValidationError(
+                f"unknown vehicle: {vehicle_id}", "unknown_vehicle", vehicle=vehicle_id
+            )

@@ -113,7 +113,7 @@ async def test_add_session_without_tariff_and_cost_is_rejected(
     # The vehicle has a default tariff, but actions do not use it.
     with pytest.raises(ServiceValidationError) as err:
         await _call(hass, "add_session", vehicle=_device(hass, "seal"), energy_kwh=10)
-    assert err.value.translation_key == "invalid_session"
+    assert err.value.translation_key == "error_cost_or_tariff"
 
 
 async def test_add_session_naive_time_is_local(hass: HomeAssistant, entry) -> None:
@@ -142,8 +142,11 @@ async def test_charge_type_without_tariff_price_is_rejected(
             energy_kwh=10,
             charge_type="dc",
         )
-    assert err.value.translation_key == "invalid_session"
-    assert "no DC price" in err.value.translation_placeholders["error"]
+    assert err.value.translation_key == "error_no_price"
+    assert err.value.translation_placeholders == {
+        "tariff": "Arbeitgeber",
+        "charge_type": "DC",
+    }
 
 
 async def test_tariff_device_as_vehicle_is_rejected(hass: HomeAssistant, entry) -> None:

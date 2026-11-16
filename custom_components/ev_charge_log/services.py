@@ -131,7 +131,7 @@ async def _run(coro: Awaitable[Session]) -> Session:
     except SessionNotFoundError as err:
         raise _error("session_not_found") from err
     except ValidationError as err:
-        raise _error("invalid_session", error=str(err)) from err
+        raise _error(err.key, **err.placeholders) from err
 
 
 def async_register_services(hass: HomeAssistant) -> None:
@@ -238,7 +238,7 @@ def async_register_services(hass: HomeAssistant) -> None:
                 vehicle_id, data["odometer"], data["since"]
             )
         except ValidationError as err:
-            raise _error("invalid_odometer", error=str(err)) from err
+            raise _error(err.key, **err.placeholders) from err
         return {
             "odometer": baseline.start,
             "since": baseline.since.isoformat(),

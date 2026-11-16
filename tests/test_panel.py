@@ -73,10 +73,12 @@ async def test_panel_websocket_lists_vehicles(
     seal = result["vehicles"][1]
     assert seal["id"] == "seal"
     inputs = [row["entity"] for row in seal["input"]]
-    assert len(inputs) == 6
+    assert len(inputs) == 5
     assert inputs[0].startswith("date.")
-    assert [e for e in inputs if e.startswith("button.")] == [inputs[-1]]
-    assert not any(e.endswith("reset_input") for e in inputs)
+    # No buttons among the inputs: "book" is sent separately.
+    assert not any(e.startswith("button.") for e in inputs)
+    assert seal["book"]["entity"].startswith("button.")
+    assert seal["book"]["name"] == "Ladung buchen"
     # Short names without the vehicle name.
     assert [row["name"] for row in seal["input"]] == [
         "Datum (optional)",
@@ -84,7 +86,6 @@ async def test_panel_websocket_lists_vehicles(
         "Betrag (optional)",
         "Tarif",
         "Ladeart",
-        "Ladung buchen",
     ]
     assert seal["stats"][0]["entity"].startswith("sensor.")
     assert seal["stats"][0]["name"] == "Gesamtkosten"
@@ -309,3 +310,32 @@ async def test_panel_history_websocket(hass: HomeAssistant, hass_ws_client) -> N
         }
     )
     assert not (await client.receive_json())["success"]
+
+
+async def test_panel_data_has_the_integration_version(hass: HomeAssistant) -> None:
+    import json
+    from pathlib import Path
+
+    await setup_entries(hass, SUBENTRIES)
+    manifest = json.loads(
+        (
+            Path(__file__).parent.parent
+            / "custom_components/ev_charge_log/manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    result = await async_panel_data(hass)
+    assert result["version"] == manifest["version"]
+    module_url = _panels(hass)[PANEL_URL_PATH].config["_panel_custom"]["module_url"]
+    assert module_url.endswith(f"?v={manifest['version']}")
+
+
+async def test_panel_sends_translated_error_messages(hass: HomeAssistant) -> None:
+    hass.config.language = "de"
+    await setup_entries(hass, SUBENTRIES)
+    result = await async_panel_data(hass)
+    errors = result["errors"]
+    assert errors["energy_required"] == "Bitte zuerst die geladene Energie eingeben."
+    # Placeholders are filled by the panel.
+    assert (
+        errors["error_no_price"] == "Der Tarif {tariff} hat keinen {charge_type}-Preis."
+    )

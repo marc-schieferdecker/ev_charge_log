@@ -43,10 +43,11 @@ INPUT_ENTITIES = (
     ("number", "input_cost"),
     ("select", "input_tariff"),
     ("select", "input_charge_type"),
-    ("button", "book"),
-    # "reset_input" is left out on purpose (user request); the entity stays
+    # "book" is sent separately and shown as an own button below the inputs;
+    # "reset_input" is left out on purpose (user request), the entity stays
     # available for own dashboards.
 )
+BOOK_ENTITY = ("button", "book")
 STAT_ENTITIES = (
     ("sensor", "total_cost"),
     ("sensor", "total_energy"),
@@ -63,6 +64,8 @@ TEXT_KEYS = (
     "panel_empty",
     "panel_add",
     "panel_input",
+    "panel_booked",
+    "panel_reload",
     "panel_stats",
     "panel_chart_energy",
     "panel_chart_cost",
@@ -285,6 +288,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "name": vehicle.name,
                     "device_id": device_of("button", f"{vehicle.id}_book"),
                     "input": entities(vehicle.id, INPUT_ENTITIES),
+                    "book": next(iter(entities(vehicle.id, (BOOK_ENTITY,))), None),
                     "stats": entities(vehicle.id, STAT_ENTITIES),
                     "history": vehicle_history(coord, vehicle.id, current_month),
                     "sessions": sessions(vehicle.id),
@@ -305,10 +309,21 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
 
     prefix = f"component.{DOMAIN}.exceptions"
     texts = {key: panel_texts.get(f"{prefix}.{key}.message", key) for key in TEXT_KEYS}
+    # Error messages by translation key: HA sends errors of actions in
+    # English plus the key; the panel shows them in the HA language.
+    errors = {
+        key.removeprefix(f"{prefix}.").removesuffix(".message"): message
+        for key, message in panel_texts.items()
+        if key.startswith(prefix) and key.endswith(".message")
+    }
     return {
         "vehicles": vehicles,
         "tariffs": tariffs,
         "config_url": f"/config/integrations/integration/{DOMAIN}",
         "texts": texts,
+        "errors": errors,
         "currency": hass.config.currency,
+        # The panel compares this with its own module version and asks for a
+        # reload if the browser still runs an older panel module.
+        "version": (await async_get_integration(hass, DOMAIN)).version,
     }
