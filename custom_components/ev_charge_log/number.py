@@ -1,4 +1,4 @@
-"""Dashboard input fields: energy and optional cost per vehicle."""
+"""Dashboard input fields: energy, optional cost and SoC per vehicle."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     NumberMode,
 )
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import PERCENTAGE, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -34,7 +34,33 @@ COST = NumberEntityDescription(
     native_step=0.01,
     mode=NumberMode.BOX,
 )
-_FIELDS = {ENERGY.key: "energy_kwh", COST.key: "cost"}
+# SoC: display only, never used for costs. Overrides the detected values.
+SOC_START = NumberEntityDescription(
+    key="input_soc_start",
+    translation_key="input_soc_start",
+    device_class=NumberDeviceClass.BATTERY,
+    native_unit_of_measurement=PERCENTAGE,
+    native_min_value=0,
+    native_max_value=100,
+    native_step=1,
+    mode=NumberMode.BOX,
+)
+SOC_END = NumberEntityDescription(
+    key="input_soc_end",
+    translation_key="input_soc_end",
+    device_class=NumberDeviceClass.BATTERY,
+    native_unit_of_measurement=PERCENTAGE,
+    native_min_value=0,
+    native_max_value=100,
+    native_step=1,
+    mode=NumberMode.BOX,
+)
+_FIELDS = {
+    ENERGY.key: "energy_kwh",
+    COST.key: "cost",
+    SOC_START.key: "soc_start",
+    SOC_END.key: "soc_end",
+}
 
 
 async def async_setup_entry(
@@ -47,7 +73,10 @@ async def async_setup_entry(
     for vehicle_id in coord.vehicles:
         device = vehicle_device(coord, vehicle_id)
         async_add_entities(
-            [InputNumber(coord, vehicle_id, device, d) for d in (ENERGY, COST)],
+            [
+                InputNumber(coord, vehicle_id, device, d)
+                for d in (ENERGY, COST, SOC_START, SOC_END)
+            ],
             config_subentry_id=vehicle_id,
         )
 

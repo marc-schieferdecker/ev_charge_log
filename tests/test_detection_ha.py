@@ -360,6 +360,40 @@ async def test_notification_in_german(hass: HomeAssistant, entry) -> None:
 # --- SoC by hand and backdated bookings ------------------------------------------
 
 
+async def _set_number(hass: HomeAssistant, vehicle: str, key: str, value) -> None:
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {"entity_id": _entity(hass, "number", vehicle, key), "value": value},
+        blocking=True,
+    )
+
+
+async def test_dashboard_soc_inputs_override_detected(
+    hass: HomeAssistant, entry
+) -> None:
+    await _charge(hass, "31", "80")
+    await _set_number(hass, "seal", "input_soc_start", 20)
+    await _set_number(hass, "seal", "input_soc_end", 65)
+    await _book_dashboard(hass, "seal", 40)
+
+    session = entry.runtime_data.log.last_session("seal")
+    assert (session.soc_start, session.soc_end) == (20.0, 65.0)
+    assert session.source == "reminder"
+    # Cleared after booking.
+    for key in ("input_soc_start", "input_soc_end"):
+        assert hass.states.get(_entity(hass, "number", "seal", key)).state == (
+            "unknown"
+        )
+
+
+async def test_dashboard_soc_input_only_end(hass: HomeAssistant, entry) -> None:
+    await _set_number(hass, "seal", "input_soc_end", 0)  # 0 is a valid SoC
+    await _book_dashboard(hass, "seal", 10)
+    session = entry.runtime_data.log.last_session("seal")
+    assert (session.soc_start, session.soc_end) == (None, 0.0)
+
+
 async def test_backdated_dashboard_booking_takes_no_current_soc(
     hass: HomeAssistant, entry
 ) -> None:

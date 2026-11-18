@@ -122,6 +122,8 @@ class VehicleInput:
     tariff_id: str | None = None
     charge_type: str = CHARGE_TYPE_AC
     day: date | None = None  # None: today
+    soc_start: float | None = None  # by hand; overrides the detection
+    soc_end: float | None = None
 
 
 class EvChargeLogCoordinator:
@@ -892,6 +894,8 @@ class EvChargeLogCoordinator:
                 timestamp=timestamp,
                 tariff_id=current.tariff_id,
                 cost=current.cost,
+                soc_start=current.soc_start,
+                soc_end=current.soc_end,
             ),
             timestamp_given=current.day is not None,
         )

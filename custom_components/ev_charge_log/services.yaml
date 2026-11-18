@@ -101,6 +101,12 @@ update_session:
         datetime:
     soc_start: *soc
     soc_end: *soc
+    clear_soc_start:
+      selector:
+        boolean:
+    clear_soc_end:
+      selector:
+        boolean:
     location: *text
     note: *text
 

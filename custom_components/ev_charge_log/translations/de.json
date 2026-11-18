@@ -190,7 +190,9 @@
     },
     "number": {
       "input_energy": { "name": "Eingabe Energie" },
-      "input_cost": { "name": "Eingabe Betrag (optional)" }
+      "input_cost": { "name": "Eingabe Betrag (optional)" },
+      "input_soc_start": { "name": "Eingabe SoC Beginn (optional)" },
+      "input_soc_end": { "name": "Eingabe SoC Ende (optional)" }
     },
     "select": {
       "input_tariff": { "name": "Eingabe Tarif" },
@@ -228,6 +230,8 @@
     "panel_sessions": { "message": "Ladungen" },
     "panel_no_sessions": { "message": "Noch keine Ladungen." },
     "panel_soc": { "message": "SoC" },
+    "panel_soc_start": { "message": "Beginn" },
+    "panel_soc_end": { "message": "Ende" },
     "panel_older": { "message": "Ältere Ladungen" },
     "panel_older_month": { "message": "Vormonat" },
     "panel_newer_month": { "message": "Folgemonat" },
@@ -253,6 +257,7 @@
     "panel_label_input_date": { "message": "Datum (optional)" },
     "panel_label_input_energy": { "message": "Energie" },
     "panel_label_input_cost": { "message": "Betrag (optional)" },
+    "panel_label_input_soc": { "message": "SoC (optional)" },
     "panel_label_input_tariff": { "message": "Tarif" },
     "panel_label_input_charge_type": { "message": "Ladeart" },
     "panel_label_book": { "message": "Ladung buchen" },
@@ -267,6 +272,8 @@
     "session_not_found": { "message": "Für dieses Fahrzeug wurde keine passende Ladung gefunden." },
     "energy_required": { "message": "Bitte zuerst die geladene Energie eingeben." },
     "cost_conflict": { "message": "Entweder einen Betrag angeben oder „Betrag entfernen“ wählen, nicht beides." },
+    "soc_start_conflict": { "message": "Entweder einen Start-SoC angeben oder „SoC Beginn entfernen“ wählen, nicht beides." },
+    "soc_end_conflict": { "message": "Entweder einen End-SoC angeben oder „SoC Ende entfernen“ wählen, nicht beides." },
     "error_negative_price_ac": { "message": "Der AC-Preis darf nicht negativ sein." },
     "error_negative_price_dc": { "message": "Der DC-Preis darf nicht negativ sein." },
     "error_negative_monthly_fee": { "message": "Die Grundgebühr darf nicht negativ sein." },
@@ -323,6 +330,8 @@
         "timestamp": { "name": "Zeitpunkt", "description": "Korrigiertes Ende der Ladung." },
         "soc_start": { "name": "SoC Beginn", "description": "Nur Anzeige." },
         "soc_end": { "name": "SoC Ende", "description": "Nur Anzeige." },
+        "clear_soc_start": { "name": "SoC Beginn entfernen", "description": "Den Start-SoC der Ladung entfernen." },
+        "clear_soc_end": { "name": "SoC Ende entfernen", "description": "Den End-SoC der Ladung entfernen." },
         "location": { "name": "Ort", "description": "Freitext." },
         "note": { "name": "Notiz", "description": "Freitext." }
       }

@@ -10,6 +10,7 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from custom_components.ev_charge_log.const import DOMAIN
@@ -72,9 +73,20 @@ async def test_panel_websocket_lists_vehicles(
     assert [v["name"] for v in result["vehicles"]] == ["Dolphin", "Seal U"]
     seal = result["vehicles"][1]
     assert seal["id"] == "seal"
-    inputs = [row["entity"] for row in seal["input"]]
-    assert len(inputs) == 5
+    inputs = [row.get("entity") for row in seal["input"]]
+    assert len(inputs) == 6
     assert inputs[0].startswith("date.")
+    # Both SoC fields in one own row.
+    soc = seal["input"][3]
+    assert soc["type"] == "soc"
+    assert soc["vehicle_id"] == "seal"
+    assert soc["start"].startswith("number.")
+    assert soc["end"].startswith("number.")
+    assert (result["texts"]["panel_soc_start"], result["texts"]["panel_soc_end"]) == (
+        "Beginn",
+        "Ende",
+    )
+    inputs = [e for e in inputs if e]
     # No buttons among the inputs: "book" is sent separately.
     assert not any(e.startswith("button.") for e in inputs)
     assert seal["book"]["entity"].startswith("button.")
@@ -84,6 +96,7 @@ async def test_panel_websocket_lists_vehicles(
         "Datum (optional)",
         "Energie",
         "Betrag (optional)",
+        "SoC (optional)",
         "Tarif",
         "Ladeart",
     ]
@@ -100,6 +113,41 @@ async def test_panel_websocket_lists_vehicles(
     assert result["texts"]["panel_last"] == "Letzte Ladung"
     assert result["config_url"] == "/config/integrations/integration/ev_charge_log"
     assert result["texts"]["panel_input"] == "Ladung eintragen"
+
+
+async def test_panel_set_soc_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_set_soc",
+            "vehicle_id": "seal",
+            "soc_start": 33,
+            "soc_end": 0,
+        }
+    )
+    assert (await client.receive_json())["success"]
+    assert (coord.inputs["seal"].soc_start, coord.inputs["seal"].soc_end) == (33, 0)
+
+    # null empties a field (number.set_value cannot), the other one stays.
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_set_soc", "vehicle_id": "seal", "soc_start": None}
+    )
+    assert (await client.receive_json())["success"]
+    assert (coord.inputs["seal"].soc_start, coord.inputs["seal"].soc_end) == (None, 0)
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    start = registry.async_get_entity_id("number", DOMAIN, "seal_input_soc_start")
+    assert hass.states.get(start).state == "unknown"
+
+    for bad in (
+        {"vehicle_id": "nope", "soc_end": 5},
+        {"vehicle_id": "seal", "soc_end": 101},
+    ):
+        await client.send_json_auto_id({"type": "ev_charge_log/panel_set_soc", **bad})
+        assert not (await client.receive_json())["success"]
 
 
 async def test_panel_without_vehicles(hass: HomeAssistant, hass_ws_client) -> None:

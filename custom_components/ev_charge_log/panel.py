@@ -36,11 +36,17 @@ WS_HISTORY_TYPE = f"{DOMAIN}/panel_history"
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
 
+WS_SET_SOC_TYPE = f"{DOMAIN}/panel_set_soc"
+# Pseudo platform: the panel shows input_soc_start and input_soc_end in one row.
+SOC_ROW = "soc"
+
 # (platform, key) of the entities shown per vehicle, in this order.
 INPUT_ENTITIES = (
     ("date", "input_date"),
     ("number", "input_energy"),
     ("number", "input_cost"),
+    # One own row with both SoC fields side by side (input_soc_start/_end).
+    (SOC_ROW, "input_soc"),
     ("select", "input_tariff"),
     ("select", "input_charge_type"),
     # "book" is sent separately and shown as an own button below the inputs;
@@ -77,6 +83,8 @@ TEXT_KEYS = (
     "panel_sessions",
     "panel_no_sessions",
     "panel_soc",
+    "panel_soc_start",
+    "panel_soc_end",
     "panel_older",
     "panel_older_month",
     "panel_newer_month",
@@ -121,6 +129,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         )
         websocket_api.async_register_command(hass, websocket_panel)
         websocket_api.async_register_command(hass, websocket_history)
+        websocket_api.async_register_command(hass, websocket_set_soc)
         hass.data[_SETUP_DONE] = True
 
     # The frontend is a soft dependency (after_dependencies): always loaded in
@@ -182,6 +191,37 @@ def websocket_history(
     connection.send_result(
         msg["id"], vehicle_history(coord, msg["vehicle_id"], msg["month"])
     )
+
+
+_SOC_VALUE = vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100)))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_SET_SOC_TYPE,
+        vol.Required("vehicle_id"): str,
+        vol.Optional("soc_start"): _SOC_VALUE,
+        vol.Optional("soc_end"): _SOC_VALUE,
+    }
+)
+@callback
+def websocket_set_soc(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set or clear the SoC input fields of a vehicle.
+
+    A number entity cannot be emptied with number.set_value; the panel's SoC
+    row uses this command so a cleared field really means "no SoC".
+    """
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None or msg["vehicle_id"] not in coord.inputs:
+        connection.send_error(msg["id"], "not_found", "Unknown vehicle")
+        return
+    values = {name: msg[name] for name in ("soc_start", "soc_end") if name in msg}
+    coord.async_set_input(msg["vehicle_id"], **values)
+    connection.send_result(msg["id"])
 
 
 def vehicle_history(
@@ -247,6 +287,24 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
     ) -> list[dict[str, Any]]:
         rows = []
         for platform, key in spec:
+            if platform == SOC_ROW:
+                start, end = (
+                    registry.async_get_entity_id(
+                        "number", DOMAIN, f"{vehicle_id}_{key}_{part}"
+                    )
+                    for part in ("start", "end")
+                )
+                if start and end:
+                    rows.append(
+                        {
+                            "type": SOC_ROW,
+                            "vehicle_id": vehicle_id,
+                            "start": start,
+                            "end": end,
+                            "name": label(platform, key),
+                        }
+                    )
+                continue
             entity_id = registry.async_get_entity_id(
                 platform, DOMAIN, f"{vehicle_id}_{key}"
             )

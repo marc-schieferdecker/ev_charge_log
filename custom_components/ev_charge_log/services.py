@@ -55,6 +55,8 @@ UPDATE_SCHEMA = vol.Schema(
         vol.Optional("energy_kwh"): _NUMBER,
         vol.Optional("charge_type"): vol.In(CHARGE_TYPES),
         vol.Optional("clear_cost"): cv.boolean,
+        vol.Optional("clear_soc_start"): cv.boolean,
+        vol.Optional("clear_soc_end"): cv.boolean,
         **_SESSION_FIELDS,
     }
 )
@@ -197,6 +199,11 @@ def async_register_services(hass: HomeAssistant) -> None:
             changes["cost"] = None
         elif "cost" in data:
             changes["cost"] = data["cost"]
+        for name in ("soc_start", "soc_end"):
+            if data.get(f"clear_{name}"):
+                if name in data:
+                    raise _error(f"{name}_conflict")
+                changes[name] = None
         session = await _run(
             coord.async_update_session(vehicle_id, data.get("session_id"), **changes)
         )

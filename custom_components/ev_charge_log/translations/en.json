@@ -190,7 +190,9 @@
     },
     "number": {
       "input_energy": { "name": "Input energy" },
-      "input_cost": { "name": "Input cost (optional)" }
+      "input_cost": { "name": "Input cost (optional)" },
+      "input_soc_start": { "name": "Input SoC start (optional)" },
+      "input_soc_end": { "name": "Input SoC end (optional)" }
     },
     "select": {
       "input_tariff": { "name": "Input tariff" },
@@ -228,6 +230,8 @@
     "panel_sessions": { "message": "Sessions" },
     "panel_no_sessions": { "message": "No sessions yet." },
     "panel_soc": { "message": "SoC" },
+    "panel_soc_start": { "message": "Start" },
+    "panel_soc_end": { "message": "End" },
     "panel_older": { "message": "Older sessions" },
     "panel_older_month": { "message": "Previous month" },
     "panel_newer_month": { "message": "Next month" },
@@ -253,6 +257,7 @@
     "panel_label_input_date": { "message": "Date (optional)" },
     "panel_label_input_energy": { "message": "Energy" },
     "panel_label_input_cost": { "message": "Cost (optional)" },
+    "panel_label_input_soc": { "message": "SoC (optional)" },
     "panel_label_input_tariff": { "message": "Tariff" },
     "panel_label_input_charge_type": { "message": "Charge type" },
     "panel_label_book": { "message": "Book session" },
@@ -267,6 +272,8 @@
     "session_not_found": { "message": "No matching session found for this vehicle." },
     "energy_required": { "message": "Please enter the charged energy first." },
     "cost_conflict": { "message": "Use either a cost or \"Clear cost\", not both." },
+    "soc_start_conflict": { "message": "Use either a start SoC or \"Clear SoC start\", not both." },
+    "soc_end_conflict": { "message": "Use either an end SoC or \"Clear SoC end\", not both." },
     "error_negative_price_ac": { "message": "The AC price must not be negative." },
     "error_negative_price_dc": { "message": "The DC price must not be negative." },
     "error_negative_monthly_fee": { "message": "The monthly fee must not be negative." },
@@ -323,6 +330,8 @@
         "timestamp": { "name": "Time", "description": "Corrected end of charging." },
         "soc_start": { "name": "SoC start", "description": "Display only." },
         "soc_end": { "name": "SoC end", "description": "Display only." },
+        "clear_soc_start": { "name": "Clear SoC start", "description": "Remove the start SoC of the session." },
+        "clear_soc_end": { "name": "Clear SoC end", "description": "Remove the end SoC of the session." },
         "location": { "name": "Location", "description": "Free text." },
         "note": { "name": "Note", "description": "Free text." }
       }

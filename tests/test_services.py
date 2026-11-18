@@ -228,6 +228,47 @@ async def test_update_cost_and_clear_cost_conflict(hass: HomeAssistant, entry) -
     assert err.value.translation_key == "cost_conflict"
 
 
+async def test_update_sets_and_clears_soc(hass: HomeAssistant, entry) -> None:
+    await _book(hass, "seal", "enbw")
+    result = await _call(
+        hass, "update_session", vehicle=_device(hass, "seal"), soc_start=33, soc_end=55
+    )
+    assert (result["session"]["soc_start"], result["session"]["soc_end"]) == (
+        33.0,
+        55.0,
+    )
+    result = await _call(
+        hass, "update_session", vehicle=_device(hass, "seal"), clear_soc_start=True
+    )
+    assert (result["session"]["soc_start"], result["session"]["soc_end"]) == (
+        None,
+        55.0,
+    )
+    result = await _call(
+        hass, "update_session", vehicle=_device(hass, "seal"), clear_soc_end=True
+    )
+    assert (result["session"]["soc_start"], result["session"]["soc_end"]) == (
+        None,
+        None,
+    )
+    assert result["session"]["cost"] == 23.60  # costs untouched
+
+
+@pytest.mark.parametrize("name", ["soc_start", "soc_end"])
+async def test_update_soc_and_clear_soc_conflict(
+    hass: HomeAssistant, entry, name: str
+) -> None:
+    await _book(hass, "seal", "enbw")
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(
+            hass,
+            "update_session",
+            vehicle=_device(hass, "seal"),
+            **{name: 40, f"clear_{name}": True},
+        )
+    assert err.value.translation_key == f"{name}_conflict"
+
+
 async def test_update_without_sessions(hass: HomeAssistant, entry) -> None:
     with pytest.raises(ServiceValidationError) as err:
         await _call(hass, "update_session", vehicle=_device(hass, "seal"), note="x")

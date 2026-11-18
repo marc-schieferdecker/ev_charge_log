@@ -265,6 +265,15 @@ const STYLE = `
     background: var(--secondary-background-color);
     color: var(--primary-text-color);
   }
+  .soc-pair {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .soc-pair input {
+    flex: 1;
+    min-width: 0;
+  }
   .dialog-error {
     color: var(--error-color);
     min-height: 1em;
@@ -317,6 +326,7 @@ const DOMAIN = "ev_charge_log";
 // Version of this module, from "?v=<version>" in its URL (see panel.py).
 const MODULE_VERSION = new URL(import.meta.url).searchParams.get("v");
 const PAGE_SIZE = 5;
+const SOC_ROW = "ev-charge-log-soc-row";
 
 class EvChargeLogPanel extends HTMLElement {
   constructor() {
@@ -479,8 +489,22 @@ class EvChargeLogPanel extends HTMLElement {
     }
 
     content.className = "content";
-    // Short row names; without a name the entity's own name is used.
-    const row = (r) => (r.name ? { entity: r.entity, name: r.name } : r.entity);
+    // Short row names; without a name the entity's own name is used. The SoC
+    // row is our own row element with both fields side by side.
+    const row = (r) => {
+      if (r.type === "soc") {
+        return {
+          type: `custom:${SOC_ROW}`,
+          vehicle_id: r.vehicle_id,
+          start: r.start,
+          end: r.end,
+          name: r.name,
+          start_label: data.texts.panel_soc_start,
+          end_label: data.texts.panel_soc_end,
+        };
+      }
+      return r.name ? { entity: r.entity, name: r.name } : r.entity;
+    };
     for (const vehicle of data.vehicles) {
       const column = document.createElement("div");
       column.className = "column";
@@ -760,6 +784,26 @@ class EvChargeLogPanel extends HTMLElement {
     costInput.value = session.cost_overridden ? String(session.cost) : "";
     costInput.placeholder = this._money(session.cost, data.currency);
 
+    const socInput = (value, label) => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.inputMode = "decimal";
+      input.value = value == null ? "" : String(value);
+      input.placeholder = label;
+      input.setAttribute("aria-label", `${texts.panel_soc} ${label}`);
+      return input;
+    };
+    const socStartInput = socInput(session.soc_start, texts.panel_soc_start);
+    const socEndInput = socInput(session.soc_end, texts.panel_soc_end);
+    // Both SoC fields in one line: "[start] → [end] %".
+    const socPair = document.createElement("div");
+    socPair.className = "soc-pair";
+    const arrow = document.createElement("span");
+    arrow.textContent = "→";
+    const percent = document.createElement("span");
+    percent.textContent = "%";
+    socPair.append(socStartInput, arrow, socEndInput, percent);
+
     const noteInput = document.createElement("input");
     noteInput.type = "text";
     noteInput.value = session.note || "";
@@ -774,6 +818,7 @@ class EvChargeLogPanel extends HTMLElement {
         costInput,
         texts.panel_field_cost_hint
       ),
+      this._field(texts.panel_soc, socPair),
       this._field(texts.panel_field_note, noteInput)
     );
 
@@ -847,6 +892,23 @@ class EvChargeLogPanel extends HTMLElement {
           return;
         }
         if (!session.cost_overridden || cost !== session.cost) changes.cost = cost;
+      }
+      // SoC: empty field removes the value.
+      for (const [name, input, label] of [
+        ["soc_start", socStartInput, texts.panel_soc_start],
+        ["soc_end", socEndInput, texts.panel_soc_end],
+      ]) {
+        const text = input.value.trim();
+        if (text === "") {
+          if (session[name] != null) changes[`clear_${name}`] = true;
+          continue;
+        }
+        const value = this._parse(text);
+        if (value === null || value > 100) {
+          error.textContent = `${texts.panel_soc} ${label}: ${text}`;
+          return;
+        }
+        if (value !== session[name]) changes[name] = value;
       }
       if (noteInput.value !== (session.note || "")) changes.note = noteInput.value;
 
@@ -1116,6 +1178,180 @@ class EvChargeLogPanel extends HTMLElement {
   }
 }
 
+// Row of the entities card with both SoC input fields side by side
+// ("SoC  [start] → [end] %"), laid out like a Home Assistant entity row.
+// It writes via "ev_charge_log/panel_set_soc", because number.set_value
+// cannot empty a field.
+const SOC_ROW_STYLE = `
+  :host {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+  }
+  .icon {
+    flex: none;
+    width: 40px;
+    display: flex;
+    justify-content: center;
+    color: var(--state-icon-color);
+  }
+  .name {
+    flex: 1;
+    margin-left: 16px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fields {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+  }
+  /* Home Assistant's own text field, as in the number rows above:
+     ha-input since HA 2026, ha-textfield before. */
+  ha-input,
+  ha-textfield {
+    width: 100px;
+    --ha-input-text-align: end;
+    --text-field-text-align: end;
+  }
+  ha-input::part(wa-input) {
+    text-align: right;
+    direction: ltr;
+  }
+`;
+
+// Text field element of the running Home Assistant version.
+const FIELD_TAGS = ["ha-input", "ha-textfield"];
+
+async function fieldTag() {
+  const known = FIELD_TAGS.find((tag) => customElements.get(tag));
+  if (known) return known;
+  // Loaded lazily together with the number rows of the same card.
+  return Promise.race(
+    FIELD_TAGS.map((tag) => customElements.whenDefined(tag).then(() => tag))
+  );
+}
+
+class EvChargeLogSocRow extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+  }
+
+  setConfig(config) {
+    if (!config || !config.start || !config.end || !config.vehicle_id) {
+      throw new Error("start, end and vehicle_id are required");
+    }
+    this._config = config;
+    this._build();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._sync();
+  }
+
+  async _build() {
+    const tag = await fieldTag();
+    const root = this.shadowRoot;
+    root.innerHTML = "";
+    const style = document.createElement("style");
+    style.textContent = SOC_ROW_STYLE;
+    const icon = document.createElement("div");
+    icon.className = "icon";
+    const haIcon = document.createElement("ha-icon");
+    haIcon.icon = "mdi:battery-charging";
+    icon.appendChild(haIcon);
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = this._config.name || "SoC";
+    const fields = document.createElement("div");
+    fields.className = "fields";
+    this._start = this._input(tag, "soc_start", this._config.start_label);
+    this._end = this._input(tag, "soc_end", this._config.end_label);
+    const arrow = document.createElement("span");
+    arrow.textContent = "→";
+    fields.append(this._start, arrow, this._end);
+    root.append(style, icon, name, fields);
+    this._sync();
+  }
+
+  _input(tag, field, label) {
+    // Same element and settings as Home Assistant's number row (box mode),
+    // unit "%" at the end like "kWh"; the label floats when filled.
+    const input = document.createElement(tag);
+    input.type = "number";
+    input.min = 0;
+    input.max = 100;
+    input.step = "any";
+    input.label = label || "";
+    if (tag === "ha-input") {
+      input.accessibleLabel = `${this._config.name || "SoC"} ${label || ""}`;
+      const unit = document.createElement("span");
+      unit.slot = "end";
+      unit.textContent = "%";
+      input.appendChild(unit);
+    } else {
+      input.suffix = "%";
+    }
+    input.addEventListener("change", () => this._save(field, input));
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") input.blur();
+    });
+    return input;
+  }
+
+  _sync() {
+    // Show the entity states; leave a field alone while it is being edited.
+    if (!this._hass || !this._config || !this._start) return;
+    for (const [input, entityId] of [
+      [this._start, this._config.start],
+      [this._end, this._config.end],
+    ]) {
+      if (this.shadowRoot.activeElement === input) continue;
+      const state = this._hass.states[entityId];
+      const value = state ? Number(state.state) : NaN;
+      input.value = Number.isFinite(value) ? String(value) : "";
+      input.invalid = false;
+    }
+  }
+
+  async _save(field, input) {
+    // A number field reports unparsable input as "" (badInput): that must not
+    // clear the stored SoC.
+    if (input.validity && input.validity.badInput) {
+      input.invalid = true;
+      return;
+    }
+    const text = String(input.value || "").trim().replace(",", ".");
+    let value = null;
+    if (text !== "") {
+      value = /^\d+(\.\d+)?$/.test(text) ? Number(text) : NaN;
+      if (!(value >= 0 && value <= 100)) {
+        input.invalid = true;
+        return;
+      }
+    }
+    input.invalid = false;
+    try {
+      await this._hass.callWS({
+        type: "ev_charge_log/panel_set_soc",
+        vehicle_id: this._config.vehicle_id,
+        [field]: value,
+      });
+    } catch (err) {
+      input.invalid = true;
+      console.warn("EV Charge Log: setting the SoC failed", err);
+    }
+  }
+}
+
+if (!customElements.get(SOC_ROW)) {
+  customElements.define(SOC_ROW, EvChargeLogSocRow);
+}
 if (!customElements.get("ev-charge-log-panel")) {
   customElements.define("ev-charge-log-panel", EvChargeLogPanel);
 }
