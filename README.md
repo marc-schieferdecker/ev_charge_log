@@ -22,19 +22,16 @@ Home Assistant 2026.3 on.
 
 ### Marketplace (Home Assistant 2026.11 and newer)
 
-Since 2026.11, HACS is built into Home Assistant as the **Marketplace**.
-EV Charge Log is not in its default list yet, so add it by link:
+Since 2026.11, HACS is built into Home Assistant as the **Marketplace**,
+and EV Charge Log is listed there:
 
-1. *Settings → Marketplace*, then *Add from link* in the top right corner.
-2. Enter `https://github.com/marc-schieferdecker/ev_charge_log`.
-3. Install **EV Charge Log** and restart Home Assistant.
+1. Open *Settings → Marketplace* and search for **EV Charge Log**.
+2. Install it and restart Home Assistant.
 
 ### HACS (Home Assistant 2026.10 and older)
 
-1. In HACS, open the menu → *Custom repositories*.
-2. Add `https://github.com/marc-schieferdecker/ev_charge_log` with type
-   *Integration*.
-3. Install **EV Charge Log** and restart Home Assistant.
+1. Open HACS and search for **EV Charge Log**.
+2. Install it and restart Home Assistant.
 
 ### Manual
 
