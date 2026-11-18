@@ -6,7 +6,7 @@ This module must not import Home Assistant so it can be tested on its own.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -135,11 +135,17 @@ class PriceVersion:
     price_dc: float | None = None
     # Stage 4: None means "the previous monthly fee still applies".
     monthly_fee: float | None = None
+    # Stage 4: prices without subscription, for the savings in the tariff
+    # statistics. None means "the previous reference price still applies".
+    reference_price_ac: float | None = None
+    reference_price_dc: float | None = None
 
     def __post_init__(self) -> None:
         """Validate the prices."""
         _validate_prices(self.price_ac, self.price_dc)
         _require_non_negative("monthly_fee", self.monthly_fee)
+        _require_non_negative("reference_price_ac", self.reference_price_ac)
+        _require_non_negative("reference_price_dc", self.reference_price_dc)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for subentry data."""
@@ -148,6 +154,8 @@ class PriceVersion:
             "price_ac": self.price_ac,
             "price_dc": self.price_dc,
             "monthly_fee": self.monthly_fee,
+            "reference_price_ac": self.reference_price_ac,
+            "reference_price_dc": self.reference_price_dc,
         }
 
     @classmethod
@@ -158,6 +166,8 @@ class PriceVersion:
             price_ac=_optional_float(data.get("price_ac")),
             price_dc=_optional_float(data.get("price_dc")),
             monthly_fee=_optional_float(data.get("monthly_fee")),
+            reference_price_ac=_optional_float(data.get("reference_price_ac")),
+            reference_price_dc=_optional_float(data.get("reference_price_dc")),
         )
 
 
@@ -192,6 +202,10 @@ class Tariff:
     Monthly fee (stage 4): `monthly_fee` is charged to `fee_vehicle_id` for
     every month from `fee_start` to `fee_end` (both inclusive, open end if
     None). A version may change the fee from its date on.
+
+    Reference prices (stage 4): price per kWh without subscription, for the
+    savings in the tariff statistics. Like the fee, a version without a
+    reference price keeps the previous one.
     """
 
     id: str
@@ -204,11 +218,15 @@ class Tariff:
     fee_vehicle_id: str | None = None
     fee_start: date | None = None
     fee_end: date | None = None
+    reference_price_ac: float | None = None
+    reference_price_dc: float | None = None
 
     def __post_init__(self) -> None:
         """Validate the tariff and sort the versions by date."""
         _validate_prices(self.price_ac, self.price_dc)
         _require_non_negative("monthly_fee", self.monthly_fee)
+        _require_non_negative("reference_price_ac", self.reference_price_ac)
+        _require_non_negative("reference_price_dc", self.reference_price_dc)
         if self.fee_start and self.fee_end and self.fee_end < self.fee_start:
             raise ValidationError("fee_end is before fee_start", "fee_end_before_start")
         days = [v.valid_from for v in self.versions]
@@ -260,6 +278,29 @@ class Tariff:
                 fee = version.monthly_fee
         return fee
 
+    @property
+    def has_fee(self) -> bool:
+        """Whether the tariff has or had a monthly fee (base or any version)."""
+        return self.monthly_fee is not None or any(
+            v.monthly_fee is not None for v in self.versions
+        )
+
+    def reference_price_on(self, charge_type: str, day: date) -> float | None:
+        """Reference price of a charge type on a day (versions without one
+        keep the last)."""
+        name = (
+            "reference_price_dc"
+            if charge_type == CHARGE_TYPE_DC
+            else "reference_price_ac"
+        )
+        price = getattr(self, name)
+        for version in self.versions:
+            if version.valid_from > day:
+                break
+            if getattr(version, name) is not None:
+                price = getattr(version, name)
+        return price
+
     def due_fees(self, today: date, booked: set[str]) -> list[tuple[str, float]]:
         """(month, amount) of fee months up to today that are not booked yet.
 
@@ -293,6 +334,8 @@ class Tariff:
             fee_vehicle_id=data.get("fee_vehicle_id"),
             fee_start=_optional_date(data.get("fee_start")),
             fee_end=_optional_date(data.get("fee_end")),
+            reference_price_ac=_optional_float(data.get("reference_price_ac")),
+            reference_price_dc=_optional_float(data.get("reference_price_dc")),
         )
 
 
@@ -600,6 +643,114 @@ def month_totals(
     following = date(year + 1, 1, 1) if number == 12 else date(year, number + 1, 1)
     last = following - timedelta(days=1)
     return daily_totals(sessions, last, last.day, day_of)
+
+
+@dataclass(frozen=True, slots=True)
+class TariffMonthRow:
+    """One row of the tariff statistics of a month.
+
+    `tariff_id` None is the row "without tariff" (sessions without a tariff
+    or of a deleted tariff, plus fees of deleted tariffs). `fee` is None
+    without a booked fee, `saving` is None if there is nothing to show.
+    """
+
+    tariff_id: str | None
+    name: str | None
+    session_count: int
+    energy_kwh: float
+    cost: float
+    fee: float | None
+    saving: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class TariffMonthStats:
+    """Tariff rows (sorted by name, "without tariff" last) and the total."""
+
+    rows: list[TariffMonthRow]
+    total: TariffMonthRow
+
+
+def _sum_or_none(values: Iterable[Decimal]) -> Decimal | None:
+    values = list(values)
+    return sum(values, Decimal(0)) if values else None
+
+
+def tariff_month_stats(
+    sessions: Iterable[Session],
+    fees: Iterable[Fee],
+    tariffs: Mapping[str, Tariff],
+    month: str,
+    day_of: Callable[[Session], date],
+) -> TariffMonthStats:
+    """Sessions, energy, cost, fee and savings per tariff in a month ("YYYY-MM").
+
+    Rows: every existing tariff with sessions or a booked fee in the month.
+    Savings only for tariffs with a booked fee in the month:
+    sum(energy x reference price - stored cost) - fee. The reference price is
+    the one valid on the session's day; sessions without a reference price
+    for their charge type count as 0. The result may be negative.
+    """
+    groups: dict[str | None, list[Session]] = {}
+    for session in sessions:
+        if month_of(day_of(session)) != month:
+            continue
+        key = session.tariff_id if session.tariff_id in tariffs else None
+        groups.setdefault(key, []).append(session)
+    group_fees: dict[str | None, list[Decimal]] = {}
+    for fee in fees:
+        if fee.month != month:
+            continue
+        key = fee.tariff_id if fee.tariff_id in tariffs else None
+        group_fees.setdefault(key, []).append(Decimal(str(fee.amount)))
+
+    def row(tariff_id: str | None) -> TariffMonthRow:
+        tariff = tariffs.get(tariff_id) if tariff_id else None
+        group = groups.get(tariff_id, [])
+        fee = _sum_or_none(group_fees.get(tariff_id, []))
+        saving = None
+        if tariff is not None and fee is not None:
+            saving = -fee
+            for session in group:
+                reference = tariff.reference_price_on(
+                    session.charge_type, day_of(session)
+                )
+                if reference is not None:
+                    saving += Decimal(str(session.energy_kwh)) * Decimal(
+                        str(reference)
+                    ) - Decimal(str(session.cost))
+        return TariffMonthRow(
+            tariff_id=tariff_id,
+            name=tariff.name if tariff else None,
+            session_count=len(group),
+            energy_kwh=float(
+                sum((Decimal(str(s.energy_kwh)) for s in group), Decimal(0))
+            ),
+            cost=float(sum((Decimal(str(s.cost)) for s in group), Decimal(0))),
+            fee=None if fee is None else float(fee),
+            saving=None if saving is None else round_money(float(saving)),
+        )
+
+    ids = {key for key in (*groups, *group_fees) if key is not None}
+    rows = [row(tariff_id) for tariff_id in ids]
+    rows.sort(key=lambda r: ((r.name or "").casefold(), r.tariff_id or ""))
+    if None in groups or None in group_fees:
+        rows.append(row(None))
+
+    fee_total = _sum_or_none(Decimal(str(r.fee)) for r in rows if r.fee is not None)
+    saving_total = _sum_or_none(
+        Decimal(str(r.saving)) for r in rows if r.saving is not None
+    )
+    total = TariffMonthRow(
+        tariff_id=None,
+        name=None,
+        session_count=sum(r.session_count for r in rows),
+        energy_kwh=float(sum((Decimal(str(r.energy_kwh)) for r in rows), Decimal(0))),
+        cost=float(sum((Decimal(str(r.cost)) for r in rows), Decimal(0))),
+        fee=None if fee_total is None else float(fee_total),
+        saving=None if saving_total is None else float(saving_total),
+    )
+    return TariffMonthStats(rows, total)
 
 
 @dataclass(frozen=True, slots=True)

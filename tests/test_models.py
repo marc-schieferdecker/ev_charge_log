@@ -25,6 +25,7 @@ from custom_components.ev_charge_log.models import (
     round_money,
     soc_metrics,
     summarize,
+    tariff_month_stats,
 )
 
 NOW = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
@@ -397,6 +398,8 @@ def test_versions_from_dict() -> None:
         "price_ac": 0.62,
         "price_dc": None,
         "monthly_fee": None,
+        "reference_price_ac": None,
+        "reference_price_dc": None,
     }
 
 
@@ -667,3 +670,187 @@ def test_cost_per_100_free_charging_is_zero() -> None:
 
 def test_odometer_baseline_roundtrip() -> None:
     assert OdometerBaseline.from_dict(BASELINE.to_dict()) == BASELINE
+
+
+# --- tariff statistics (stage 4) -------------------------------------------
+
+ABO = Tariff(
+    id="abo",
+    name="EnBW L",
+    price_ac=0.39,
+    price_dc=0.49,
+    reference_price_dc=0.79,
+    monthly_fee=11.99,
+    fee_vehicle_id="seal",
+    fee_start=date(2026, 1, 1),
+)
+HOME = Tariff(id="home", name="Zuhause", price_ac=0.0)
+
+
+def _charge(
+    session_id: str,
+    day: date,
+    kwh: float,
+    tariff: Tariff | None,
+    charge_type: str = "dc",
+    cost: float | None = None,
+    tariff_id: str | None = None,
+) -> Session:
+    ts = datetime(day.year, day.month, day.day, 12, tzinfo=UTC)
+    data = _input(
+        energy_kwh=kwh,
+        charge_type=charge_type,
+        timestamp=ts,
+        cost=cost,
+        tariff_id=tariff.id if tariff else None,
+    )
+    session = build_session(session_id, data, tariff)
+    return replace(session, tariff_id=tariff_id) if tariff_id else session
+
+
+def _fee(tariff_id: str, month: str = "2026-11", amount: float = 11.99) -> Fee:
+    return Fee(tariff_id=tariff_id, vehicle_id="seal", month=month, amount=amount)
+
+
+def _stats(sessions, fees, tariffs=(ABO, HOME), month="2026-11"):
+    return tariff_month_stats(
+        sessions, fees, {t.id: t for t in tariffs}, month, lambda s: s.timestamp.date()
+    )
+
+
+def test_tariff_stats_saving_with_fee() -> None:
+    sessions = [
+        _charge("a", date(2026, 11, 3), 40.0, ABO),
+        _charge("b", date(2026, 11, 9), 40.0, ABO),
+    ]
+    (row,) = _stats(sessions, [_fee("abo")]).rows
+    assert (row.tariff_id, row.name, row.session_count) == ("abo", "EnBW L", 2)
+    assert row.energy_kwh == 80.0
+    assert row.cost == 39.2
+    assert row.fee == 11.99
+    # 2 x (40 x 0.79 - 19.60) - 11.99
+    assert row.saving == 12.01
+
+
+def test_tariff_stats_saving_uses_stored_cost_of_overridden_amount() -> None:
+    sessions = [_charge("a", date(2026, 11, 3), 40.0, ABO, cost=10.0)]
+    (row,) = _stats(sessions, [_fee("abo")]).rows
+    assert row.cost == 10.0
+    assert row.saving == 9.61  # 31.60 - 10.00 - 11.99
+
+
+def test_tariff_stats_reference_price_zero() -> None:
+    tariff = replace(ABO, reference_price_ac=0.0)
+    sessions = [_charge("a", date(2026, 11, 3), 10.0, tariff, charge_type="ac")]
+    (row,) = _stats(sessions, [_fee("abo")], tariffs=(tariff,)).rows
+    assert row.saving == -15.89  # 0 - 3.90 - 11.99
+
+
+def test_tariff_stats_charge_type_without_reference_counts_zero() -> None:
+    sessions = [_charge("a", date(2026, 11, 3), 10.0, ABO, charge_type="ac")]
+    (row,) = _stats(sessions, [_fee("abo", amount=10.0)]).rows
+    assert row.cost == 3.9
+    assert row.saving == -10.0
+
+
+def test_tariff_stats_month_with_fee_but_no_session() -> None:
+    (row,) = _stats([], [_fee("abo")]).rows
+    assert (row.session_count, row.energy_kwh, row.cost) == (0, 0.0, 0.0)
+    assert row.saving == -11.99
+
+
+def test_tariff_stats_reference_price_version_within_month() -> None:
+    tariff = replace(
+        ABO,
+        versions=(
+            PriceVersion(
+                valid_from=date(2026, 11, 15), price_dc=0.49, reference_price_dc=0.89
+            ),
+        ),
+    )
+    sessions = [
+        _charge("a", date(2026, 11, 10), 10.0, tariff),  # 7.90 - 4.90 = 3.00
+        _charge("b", date(2026, 11, 20), 10.0, tariff),  # 8.90 - 4.90 = 4.00
+    ]
+    (row,) = _stats(sessions, [_fee("abo", amount=5.0)], tariffs=(tariff,)).rows
+    assert row.saving == 2.0
+
+
+def test_reference_price_version_without_value_keeps_previous() -> None:
+    tariff = replace(
+        ABO, versions=(PriceVersion(valid_from=date(2026, 11, 15), price_dc=0.59),)
+    )
+    assert tariff.reference_price_on("dc", date(2026, 11, 20)) == 0.79
+    assert tariff.reference_price_on("ac", date(2026, 11, 20)) is None
+
+
+def test_tariff_stats_without_fee_has_no_saving() -> None:
+    sessions = [_charge("a", date(2026, 11, 3), 12.0, HOME, charge_type="ac")]
+    (row,) = _stats(sessions, []).rows
+    assert (row.tariff_id, row.cost, row.fee, row.saving) == ("home", 0.0, None, None)
+
+
+def test_tariff_stats_deleted_tariff_goes_to_without_tariff() -> None:
+    sessions = [
+        _charge("a", date(2026, 11, 3), 10.0, ABO, tariff_id="gone"),
+        _charge("b", date(2026, 11, 4), 5.0, None, charge_type="ac", cost=3.0),
+    ]
+    stats = _stats(sessions, [_fee("gone", amount=4.99)])
+    (row,) = stats.rows
+    assert (row.tariff_id, row.name) == (None, None)
+    assert (row.session_count, row.energy_kwh, row.cost) == (2, 15.0, 7.9)
+    assert (row.fee, row.saving) == (4.99, None)
+
+
+def test_tariff_stats_rows_sorted_and_total() -> None:
+    sessions = [
+        _charge("a", date(2026, 11, 3), 40.0, ABO),
+        _charge("b", date(2026, 11, 4), 12.0, HOME, charge_type="ac"),
+        _charge("c", date(2026, 11, 5), 5.0, None, charge_type="ac", cost=3.0),
+        _charge("old", date(2026, 10, 30), 40.0, ABO),
+    ]
+    stats = _stats(sessions, [_fee("abo"), _fee("abo", month="2026-10")])
+    assert [r.tariff_id for r in stats.rows] == ["abo", "home", None]
+    total = stats.total
+    assert (total.session_count, total.energy_kwh) == (3, 57.0)
+    assert total.cost == 22.6
+    assert total.fee == 11.99
+    assert total.saving == 0.01  # 40 x 0.79 - 19.60 - 11.99
+
+
+def test_tariff_stats_empty_month() -> None:
+    stats = _stats([], [])
+    assert stats.rows == []
+    total = stats.total
+    assert (total.session_count, total.fee, total.saving) == (0, None, None)
+
+
+def test_negative_reference_price_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        replace(ABO, reference_price_dc=-0.1)
+    with pytest.raises(ValidationError):
+        PriceVersion(valid_from=date(2026, 1, 1), price_ac=0.4, reference_price_ac=-1)
+
+
+def test_reference_prices_from_dict_and_has_fee() -> None:
+    tariff = Tariff.from_dict(
+        {
+            "id": "x",
+            "name": "X",
+            "price_dc": 0.49,
+            "reference_price_dc": 0.79,
+            "versions": [
+                {
+                    "valid_from": "2027-01-01",
+                    "price_dc": 0.52,
+                    "monthly_fee": 9.99,
+                    "reference_price_dc": 0.85,
+                }
+            ],
+        }
+    )
+    assert tariff.reference_price_dc == 0.79
+    assert tariff.versions[0].reference_price_dc == 0.85
+    assert tariff.versions[0].to_dict()["reference_price_dc"] == 0.85
+    assert tariff.has_fee
+    assert not HOME.has_fee

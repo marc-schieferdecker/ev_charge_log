@@ -103,7 +103,7 @@
         },
         "reconfigure": {
           "title": "Tarif bearbeiten",
-          "description": "Preise in {currency} pro kWh („—“ = seit Beginn, „+“ = monatliche Grundgebühr):\n\n{prices}",
+          "description": "Preise in {currency} pro kWh („—“ = seit Beginn, „+“ = monatliche Grundgebühr, in Klammern die Vergleichspreise ohne Abo AC / DC):\n\n{prices}",
           "menu_options": {
             "edit": "Name, Zonen und aktuelle Preise korrigieren",
             "add_price": "Neue Preise ab Datum",
@@ -130,6 +130,18 @@
           "description": "Gebuchte Ladungen behalten ihre gespeicherten Kosten. Die Preise seit Beginn lassen sich nicht löschen.",
           "data": {
             "valid_from": "Preisversion"
+          }
+        },
+        "reference": {
+          "title": "Vergleichspreise für {tariff}",
+          "description": "Preise in {currency} pro kWh, die du ohne dieses Abo zahlen würdest (z.B. Ad-hoc-Preis). Daraus berechnet die Seite „Ladungen“ die Ersparnis durch das Abo abzüglich der Grundgebühr. Gebuchte Ladungen ändern sich nicht.",
+          "data": {
+            "reference_price_ac": "Vergleichspreis AC",
+            "reference_price_dc": "Vergleichspreis DC"
+          },
+          "data_description": {
+            "reference_price_ac": "Optional. Leer: AC-Ladungen zählen ohne Ersparnis. Bei neuen Preisen ab Datum: Leer lässt den bisherigen Vergleichspreis weitergelten.",
+            "reference_price_dc": "Optional. Leer: DC-Ladungen zählen ohne Ersparnis. Bei neuen Preisen ab Datum: Leer lässt den bisherigen Vergleichspreis weitergelten."
           }
         },
         "edit": {
@@ -236,6 +248,17 @@
     "panel_older_month": { "message": "Vormonat" },
     "panel_newer_month": { "message": "Folgemonat" },
     "panel_newer": { "message": "Neuere Ladungen" },
+    "panel_tariff_stats": { "message": "Ladetarife" },
+    "panel_tariff_col_tariff": { "message": "Ladetarif" },
+    "panel_tariff_col_sessions": { "message": "Ladungen" },
+    "panel_tariff_col_energy": { "message": "kWh" },
+    "panel_tariff_col_cost": { "message": "Kosten" },
+    "panel_tariff_col_fee": { "message": "Grundgebühr" },
+    "panel_tariff_col_saving": { "message": "Ersparnis" },
+    "panel_tariff_without": { "message": "Ohne Tarif" },
+    "panel_tariff_total": { "message": "Summe" },
+    "panel_tariff_current_month": { "message": "Laufender Monat" },
+    "panel_tariff_empty": { "message": "Keine Ladungen und Grundgebühren in diesem Monat." },
     "panel_edit_title": { "message": "Ladung korrigieren" },
     "panel_field_date": { "message": "Datum" },
     "panel_field_energy": { "message": "Energie (kWh)" },
@@ -280,6 +303,8 @@
     "error_negative_amount": { "message": "Der Betrag der Grundgebühr darf nicht negativ sein." },
     "error_negative_cost": { "message": "Der Betrag darf nicht negativ sein." },
     "error_negative_price_per_kwh": { "message": "Der Preis pro kWh darf nicht negativ sein." },
+    "error_negative_reference_price_ac": { "message": "Der AC-Vergleichspreis darf nicht negativ sein." },
+    "error_negative_reference_price_dc": { "message": "Der DC-Vergleichspreis darf nicht negativ sein." },
     "error_capacity": { "message": "Die Akkukapazität muss größer als 0 sein." },
     "error_price_required": { "message": "Bitte einen AC- oder einen DC-Preis angeben." },
     "error_fee_end_before_start": { "message": "Der letzte Monat der Grundgebühr liegt vor dem ersten." },

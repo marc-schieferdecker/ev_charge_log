@@ -401,3 +401,82 @@ async def test_panel_sends_translated_error_messages(hass: HomeAssistant) -> Non
     assert (
         errors["error_no_price"] == "Der Tarif {tariff} hat keinen {charge_type}-Preis."
     )
+
+
+async def test_panel_tariff_stats(hass: HomeAssistant, freezer) -> None:
+    from datetime import datetime
+
+    from custom_components.ev_charge_log.models import SessionInput
+    from custom_components.ev_charge_log.panel import tariff_stats
+
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to("2026-11-15 12:00:00+01:00")
+    vehicles, _ = await setup_entries(
+        hass,
+        [
+            *SUBENTRIES,
+            _sub(
+                "tariff",
+                "abo",
+                "EnBW L",
+                price_dc=0.49,
+                monthly_fee=11.99,
+                fee_vehicle_id="seal",
+                fee_start="2026-10-01",
+                reference_price_dc=0.79,
+            ),
+        ],
+    )
+    coord = vehicles.runtime_data
+    tz = dt_util.get_default_time_zone()
+    for vehicle_id, tariff_id, kwh in (
+        ("seal", "abo", 40.0),
+        ("dolphin", "abo", 10.0),
+        ("seal", "enbw", 10.0),
+    ):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id=vehicle_id,
+                energy_kwh=kwh,
+                charge_type="dc",
+                timestamp=datetime(2026, 11, 3, 8, tzinfo=tz),
+                tariff_id=tariff_id,
+            )
+        )
+
+    result = await async_panel_data(hass)
+    stats = result["tariff_stats"]
+    assert (stats["month"], stats["current_month"]) == ("2026-11", "2026-11")
+    assert stats["first_month"] == "2026-10"  # first fee
+    enbw, abo = stats["rows"]  # sorted by name
+    assert (abo["name"], abo["sessions"], abo["energy"]) == ("EnBW L", 2, 50.0)
+    assert abo["fee"] == 11.99
+    # Both vehicles: 50 x (0.79 - 0.49) - 11.99
+    assert abo["saving"] == 3.01
+    assert (enbw["name"], enbw["fee"], enbw["saving"]) == ("EnBW", None, None)
+    assert stats["total"]["sessions"] == 3
+    assert stats["total"]["saving"] == 3.01
+    assert result["texts"]["panel_tariff_without"] == "No tariff"
+
+    october = tariff_stats(coord, "2026-10")
+    (row,) = october["rows"]
+    assert (row["sessions"], row["saving"]) == (0, -11.99)
+
+
+async def test_panel_tariff_stats_websocket(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    await setup_entries(hass, SUBENTRIES)
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_tariff_stats", "month": "2026-02"}
+    )
+    response = await client.receive_json()
+    assert response["success"]
+    assert response["result"]["month"] == "2026-02"
+    assert response["result"]["rows"] == []
+
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_tariff_stats", "month": "2026-13"}
+    )
+    assert not (await client.receive_json())["success"]

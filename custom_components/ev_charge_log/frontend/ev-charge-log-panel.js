@@ -309,6 +309,65 @@ const STYLE = `
     opacity: 0.5;
     cursor: default;
   }
+  /* Tariff statistics below the vehicles: centered, as wide as one vehicle
+     column (width set from the first column, see _observeWidth). */
+  .tariff-card {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .tariff-body {
+    padding: 16px 0 8px;
+  }
+  .tariff-scroll {
+    overflow-x: auto; /* narrow screens: scroll inside the card */
+  }
+  table.tariff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  .tariff-table th,
+  .tariff-table td {
+    padding: 6px 8px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .tariff-table th:first-child,
+  .tariff-table td:first-child {
+    padding-left: 16px;
+    text-align: left;
+    white-space: normal;
+  }
+  .tariff-table th:last-child,
+  .tariff-table td:last-child {
+    padding-right: 16px;
+  }
+  .tariff-table th {
+    font-size: 13px;
+    font-weight: normal;
+    color: var(--secondary-text-color);
+  }
+  .tariff-table td {
+    border-top: 1px solid var(--divider-color);
+  }
+  .tariff-table tr.total td {
+    font-weight: 500;
+    border-top: 2px solid var(--divider-color);
+  }
+  .tariff-table .positive {
+    color: var(--success-color, #4caf50);
+  }
+  .tariff-table .negative {
+    color: var(--error-color);
+  }
+  .tariff-hint {
+    padding: 8px 16px 0;
+    font-size: 13px;
+    color: var(--secondary-text-color);
+  }
   .empty {
     padding: 16px;
   }
@@ -417,6 +476,14 @@ class EvChargeLogPanel extends HTMLElement {
         const list = this._lists.get(vehicle.id);
         if (list) this._fillSessionList(list, vehicle, data);
       }
+      if (this._tariffCard && data.tariff_stats) {
+        const month = this._tariffMonth;
+        if (month && month !== data.tariff_stats.month) {
+          await this._showTariffMonth(month);
+        } else {
+          this._fillTariffStats(this._tariffCard, data, data.tariff_stats);
+        }
+      }
     } catch (err) {
       // Keep the old view; a full reload happens when the panel reopens.
       console.warn("EV Charge Log: refresh failed", err);
@@ -456,6 +523,8 @@ class EvChargeLogPanel extends HTMLElement {
     this._lists = new Map();
     this._month = new Map(); // a full reload starts at the current month
     this._selected = new Map();
+    this._tariffCard = null;
+    this._tariffMonth = null;
     this._data = data;
     this._watch = data.vehicles.flatMap((v) => v.watch || []);
     this._watchSignature = this._signature();
@@ -548,6 +617,26 @@ class EvChargeLogPanel extends HTMLElement {
       column.append(chart, card, statsCard, list);
       content.appendChild(column);
     }
+
+    if (data.tariff_stats) {
+      const footer = document.createElement("ha-card");
+      footer.className = "tariff-card";
+      this._fillTariffStats(footer, data, data.tariff_stats);
+      this._tariffCard = footer;
+      content.appendChild(footer);
+      this._observeWidth(content, footer);
+    }
+  }
+
+  _observeWidth(content, footer) {
+    // As wide as one vehicle column (the grid columns share the width).
+    if (this._resize) this._resize.disconnect();
+    if (!window.ResizeObserver) return;
+    this._resize = new ResizeObserver(() => {
+      const column = content.querySelector(".column");
+      if (column) footer.style.width = `${column.getBoundingClientRect().width}px`;
+    });
+    this._resize.observe(content);
   }
 
   _embedCard(card) {
@@ -1059,6 +1148,146 @@ class EvChargeLogPanel extends HTMLElement {
     newer.disabled = history.month >= history.current_month;
     newer.addEventListener("click", () =>
       this._showMonth(card, vehicle, this._shiftMonth(history.month, 1))
+    );
+    pager.append(older, newer);
+    body.appendChild(pager);
+    card.appendChild(body);
+  }
+
+  // --- tariff statistics ------------------------------------------------------
+
+  async _showTariffMonth(month) {
+    try {
+      const stats = await this._hass.callWS({
+        type: "ev_charge_log/panel_tariff_stats",
+        month,
+      });
+      this._tariffMonth = month;
+      if (this._tariffCard) this._fillTariffStats(this._tariffCard, this._data, stats);
+    } catch (err) {
+      console.warn("EV Charge Log: loading tariff month failed", err);
+    }
+  }
+
+  _currencySymbol(currency) {
+    try {
+      const parts = new Intl.NumberFormat(this._language(), {
+        style: "currency",
+        currency,
+      }).formatToParts(0);
+      const symbol = parts.find((p) => p.type === "currency");
+      return symbol ? symbol.value : currency;
+    } catch (err) {
+      return currency;
+    }
+  }
+
+  _fillTariffStats(card, data, stats) {
+    // One row per tariff over all vehicles; units only in the column heads.
+    const texts = data.texts;
+    const symbol = this._currencySymbol(data.currency);
+    const money = (v) =>
+      v == null
+        ? ""
+        : new Intl.NumberFormat(this._language(), {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(v);
+    const saving = (v) =>
+      v == null
+        ? ""
+        : new Intl.NumberFormat(this._language(), {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+            signDisplay: "exceptZero",
+          }).format(v);
+
+    card.innerHTML = "";
+    const body = document.createElement("div");
+    body.className = "tariff-body";
+    const title = document.createElement("div");
+    title.className = "list-title";
+    title.textContent = `${texts.panel_tariff_stats} · ${this._monthLabel(stats.month)}`;
+    body.appendChild(title);
+
+    if (!stats.rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "list-empty";
+      empty.textContent = texts.panel_tariff_empty;
+      body.appendChild(empty);
+    } else {
+      const table = document.createElement("table");
+      table.className = "tariff-table";
+      const head = table.createTHead().insertRow();
+      for (const text of [
+        texts.panel_tariff_col_tariff,
+        texts.panel_tariff_col_sessions,
+        texts.panel_tariff_col_energy,
+        `${texts.panel_tariff_col_cost} (${symbol})`,
+        `${texts.panel_tariff_col_fee} (${symbol})`,
+        `${texts.panel_tariff_col_saving} (${symbol})`,
+      ]) {
+        const th = document.createElement("th");
+        th.textContent = text;
+        head.appendChild(th);
+      }
+      const tbody = table.createTBody();
+      const addRow = (row, name, className) => {
+        const tr = tbody.insertRow();
+        if (className) tr.className = className;
+        const cells = [
+          name,
+          String(row.sessions),
+          this._number(row.energy, 1),
+          money(row.cost),
+          money(row.fee),
+          saving(row.saving),
+        ];
+        cells.forEach((text, i) => {
+          const td = tr.insertCell();
+          td.textContent = text;
+          if (i === 5 && row.saving) {
+            td.classList.add(row.saving > 0 ? "positive" : "negative");
+          }
+        });
+      };
+      for (const row of stats.rows) {
+        addRow(row, row.tariff_id ? row.name : texts.panel_tariff_without);
+      }
+      addRow(stats.total, texts.panel_tariff_total, "total");
+      const scroll = document.createElement("div");
+      scroll.className = "tariff-scroll";
+      scroll.appendChild(table);
+      body.appendChild(scroll);
+    }
+
+    if (stats.month === stats.current_month) {
+      const hint = document.createElement("div");
+      hint.className = "tariff-hint";
+      hint.textContent = texts.panel_tariff_current_month;
+      body.appendChild(hint);
+    }
+
+    // Month paging like the chart: "<" = previous month, ">" = next month.
+    const pager = document.createElement("div");
+    pager.className = "pager chart-pager";
+    const older = document.createElement("button");
+    older.type = "button";
+    older.textContent = "<";
+    older.title = texts.panel_older_month;
+    older.setAttribute("aria-label", texts.panel_older_month);
+    older.disabled = stats.month <= stats.first_month;
+    older.addEventListener("click", () =>
+      this._showTariffMonth(this._shiftMonth(stats.month, -1))
+    );
+    const newer = document.createElement("button");
+    newer.type = "button";
+    newer.textContent = ">";
+    newer.title = texts.panel_newer_month;
+    newer.setAttribute("aria-label", texts.panel_newer_month);
+    newer.disabled = stats.month >= stats.current_month;
+    newer.addEventListener("click", () =>
+      this._showTariffMonth(this._shiftMonth(stats.month, 1))
     );
     pager.append(older, newer);
     body.appendChild(pager);

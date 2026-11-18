@@ -103,7 +103,7 @@
         },
         "reconfigure": {
           "title": "Edit tariff",
-          "description": "Prices in {currency} per kWh (\"—\" = from the beginning, \"+\" = monthly fee):\n\n{prices}",
+          "description": "Prices in {currency} per kWh (\"—\" = from the beginning, \"+\" = monthly fee, in brackets the reference prices without subscription AC / DC):\n\n{prices}",
           "menu_options": {
             "edit": "Correct name, zones and current prices",
             "add_price": "New prices from a date",
@@ -130,6 +130,18 @@
           "description": "Booked sessions keep their stored cost. The prices from the beginning cannot be deleted.",
           "data": {
             "valid_from": "Price version"
+          }
+        },
+        "reference": {
+          "title": "Reference prices for {tariff}",
+          "description": "Prices in {currency} per kWh you would pay without this subscription (e.g. the ad hoc price). The page \"Charging log\" uses them for the savings of the subscription minus its monthly fee. Booked sessions do not change.",
+          "data": {
+            "reference_price_ac": "Reference price AC",
+            "reference_price_dc": "Reference price DC"
+          },
+          "data_description": {
+            "reference_price_ac": "Optional. Empty: AC sessions count without savings. For new prices from a date: empty keeps the previous reference price.",
+            "reference_price_dc": "Optional. Empty: DC sessions count without savings. For new prices from a date: empty keeps the previous reference price."
           }
         },
         "edit": {
@@ -236,6 +248,17 @@
     "panel_older_month": { "message": "Previous month" },
     "panel_newer_month": { "message": "Next month" },
     "panel_newer": { "message": "Newer sessions" },
+    "panel_tariff_stats": { "message": "Tariffs" },
+    "panel_tariff_col_tariff": { "message": "Tariff" },
+    "panel_tariff_col_sessions": { "message": "Sessions" },
+    "panel_tariff_col_energy": { "message": "kWh" },
+    "panel_tariff_col_cost": { "message": "Cost" },
+    "panel_tariff_col_fee": { "message": "Monthly fee" },
+    "panel_tariff_col_saving": { "message": "Savings" },
+    "panel_tariff_without": { "message": "No tariff" },
+    "panel_tariff_total": { "message": "Total" },
+    "panel_tariff_current_month": { "message": "Current month" },
+    "panel_tariff_empty": { "message": "No sessions and monthly fees in this month." },
     "panel_edit_title": { "message": "Edit session" },
     "panel_field_date": { "message": "Date" },
     "panel_field_energy": { "message": "Energy (kWh)" },
@@ -280,6 +303,8 @@
     "error_negative_amount": { "message": "The fee amount must not be negative." },
     "error_negative_cost": { "message": "The cost must not be negative." },
     "error_negative_price_per_kwh": { "message": "The price per kWh must not be negative." },
+    "error_negative_reference_price_ac": { "message": "The AC reference price must not be negative." },
+    "error_negative_reference_price_dc": { "message": "The DC reference price must not be negative." },
     "error_capacity": { "message": "The battery capacity must be greater than 0." },
     "error_price_required": { "message": "Please enter an AC or a DC price." },
     "error_fee_end_before_start": { "message": "The last month of the fee is before the first month." },

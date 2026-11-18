@@ -39,6 +39,8 @@ from .const import (
     CONF_ODOMETER_ENTITY_ID,
     CONF_PRICE_AC,
     CONF_PRICE_DC,
+    CONF_REFERENCE_PRICE_AC,
+    CONF_REFERENCE_PRICE_DC,
     CONF_REMINDER_EXCLUDED_ZONES,
     CONF_SOC_ENTITY_ID,
     CONF_VALID_FROM,
@@ -151,6 +153,19 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
         """Type-specific checks; return form errors (may set placeholders)."""
         return {}
 
+    async def _async_finish(
+        self, title: str | None, data: dict[str, Any]
+    ) -> SubentryFlowResult:
+        """Create the subentry, or update the edited one (title None = keep)."""
+        if self.source != SOURCE_RECONFIGURE:
+            return self.async_create_entry(title=title or "", data=data)
+        current = self._get_reconfigure_subentry()
+        if title is None:
+            return self.async_update_and_abort(self._get_entry(), current, data=data)
+        return self.async_update_and_abort(
+            self._get_entry(), current, title=title, data=data
+        )
+
     def _name_taken(self, name: str, own_id: str | None = None) -> bool:
         wanted = name.strip().casefold()
         return any(
@@ -189,12 +204,7 @@ class _NamedSubentryFlow(ConfigSubentryFlow):
             else:
                 errors = self._validate(user_input, own_id)
             if not errors:
-                data = to_data(user_input)
-                if current is None:
-                    return self.async_create_entry(title=name, data=data)
-                return self.async_update_and_abort(
-                    self._get_entry(), current, title=name, data=data
-                )
+                return await self._async_finish(name, to_data(user_input))
 
         if user_input is not None:
             suggested = user_input
@@ -310,7 +320,57 @@ class TariffSubentryFlow(_NamedSubentryFlow):
     Stage 3: editing opens a menu. "edit" corrects name, zones and the prices
     valid today; "add_price" adds a price version valid from a date;
     "delete_price" removes a dated version (the base prices always stay).
+
+    Stage 4: if the tariff has or had a monthly fee, "user", "edit" and
+    "add_price" are followed by the step "reference" with the prices without
+    subscription, only for the charge types the edited version has a price
+    for. A form cannot show fields depending on other fields of the same
+    form, hence the extra step.
     """
+
+    # Edited prices: valid_from of a dated version, None = base prices.
+    _target: str | None = None
+    # Values shown in the reference step (edit: the ones in effect).
+    _reference_suggested: dict[str, Any]
+    _pending: tuple[str | None, dict[str, Any]]
+
+    async def _async_finish(
+        self, title: str | None, data: dict[str, Any]
+    ) -> SubentryFlowResult:
+        """Ask for the reference prices first if the tariff has a fee."""
+        prices = _prices_of(data, self._target)
+        if _has_fee(data) and _priced_references(prices):
+            self._pending = (title, data)
+            return await self.async_step_reference()
+        return await super()._async_finish(title, data)
+
+    async def async_step_reference(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Prices without subscription, for the savings in the statistics."""
+        title, data = self._pending
+        keys = _priced_references(_prices_of(data, self._target))
+        if user_input is not None:
+            # Charge types without a price get no reference price.
+            values = {
+                key: _price(user_input, key) if key in keys else None
+                for key in (CONF_REFERENCE_PRICE_AC, CONF_REFERENCE_PRICE_DC)
+            }
+            return await super()._async_finish(
+                title, _with_prices(data, self._target, values)
+            )
+        schema = vol.Schema({vol.Optional(key): _PRICE_SELECTOR for key in keys})
+        name = title or self._get_reconfigure_subentry().title
+        return self.async_show_form(
+            step_id="reference",
+            data_schema=self.add_suggested_values_to_schema(
+                schema, getattr(self, "_reference_suggested", {})
+            ),
+            description_placeholders={
+                "tariff": name,
+                "currency": self.hass.config.currency,
+            },
+        )
 
     def _schema(self) -> vol.Schema:
         fields: dict[Any, Any] = {
@@ -412,14 +472,15 @@ class TariffSubentryFlow(_NamedSubentryFlow):
         lines += [_version_label(v[CONF_VALID_FROM], v) for v in self._versions()]
         return "\n".join(lines)
 
-    def _fee_until(self, index: int | None) -> float | None:
-        """Monthly fee in effect for the base prices or a dated version."""
-        fee = self._get_reconfigure_subentry().data.get(CONF_MONTHLY_FEE)
+    def _value_until(self, index: int | None, key: str) -> float | None:
+        """Fee or reference price in effect for the base prices or a dated
+        version (versions without a value keep the previous one)."""
+        value = self._get_reconfigure_subentry().data.get(key)
         if index is not None:
             for version in self._versions()[: index + 1]:
-                if version.get(CONF_MONTHLY_FEE) is not None:
-                    fee = version[CONF_MONTHLY_FEE]
-        return fee
+                if version.get(key) is not None:
+                    value = version[key]
+        return value
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -445,6 +506,11 @@ class TariffSubentryFlow(_NamedSubentryFlow):
         index = self._today_version_index()
         versions = self._versions()
         prices = versions[index] if index is not None else current.data
+        self._target = versions[index][CONF_VALID_FROM] if index is not None else None
+        self._reference_suggested = {
+            key: self._value_until(index, key)
+            for key in (CONF_REFERENCE_PRICE_AC, CONF_REFERENCE_PRICE_DC)
+        }
 
         def to_data(values: dict[str, Any]) -> dict[str, Any]:
             new_prices = {
@@ -476,7 +542,7 @@ class TariffSubentryFlow(_NamedSubentryFlow):
                 CONF_NAME: current.title,
                 CONF_PRICE_AC: prices.get(CONF_PRICE_AC),
                 CONF_PRICE_DC: prices.get(CONF_PRICE_DC),
-                CONF_MONTHLY_FEE: self._fee_until(index),
+                CONF_MONTHLY_FEE: self._value_until(index, CONF_MONTHLY_FEE),
                 CONF_ZONES: current.data.get(CONF_ZONES) or [],
                 CONF_FEE_VEHICLE_ID: current.data.get(CONF_FEE_VEHICLE_ID),
                 CONF_FEE_START: current.data.get(CONF_FEE_START),
@@ -508,10 +574,11 @@ class TariffSubentryFlow(_NamedSubentryFlow):
                 versions = sorted(
                     [*self._versions(), version], key=lambda v: v[CONF_VALID_FROM]
                 )
-                return self.async_update_and_abort(
-                    self._get_entry(),
-                    current,
-                    data={**current.data, CONF_VERSIONS: versions},
+                # Empty reference prices: the previous ones stay in effect.
+                self._target = valid_from
+                self._reference_suggested = {}
+                return await self._async_finish(
+                    None, {**current.data, CONF_VERSIONS: versions}
                 )
 
         schema = vol.Schema(
@@ -575,16 +642,66 @@ def _price(values: dict[str, Any], key: str) -> float | None:
     return float(value) if value is not None else None
 
 
+def _has_fee(data: Mapping[str, Any]) -> bool:
+    """Whether the tariff has or had a monthly fee (base or any version)."""
+    return data.get(CONF_MONTHLY_FEE) is not None or any(
+        v.get(CONF_MONTHLY_FEE) is not None for v in data.get(CONF_VERSIONS) or []
+    )
+
+
+def _prices_of(data: Mapping[str, Any], target: str | None) -> Mapping[str, Any]:
+    """Base prices (target None) or the dated version valid from `target`."""
+    if target is None:
+        return data
+    return next(v for v in data[CONF_VERSIONS] if v[CONF_VALID_FROM] == target)
+
+
+def _priced_references(prices: Mapping[str, Any]) -> list[str]:
+    """Reference price fields for the charge types that have a price."""
+    return [
+        reference
+        for price, reference in (
+            (CONF_PRICE_AC, CONF_REFERENCE_PRICE_AC),
+            (CONF_PRICE_DC, CONF_REFERENCE_PRICE_DC),
+        )
+        if prices.get(price) is not None
+    ]
+
+
+def _with_prices(
+    data: dict[str, Any], target: str | None, values: dict[str, Any]
+) -> dict[str, Any]:
+    """Copy of the data with `values` set on the base prices or a version."""
+    if target is None:
+        return {**data, **values}
+    return {
+        **data,
+        CONF_VERSIONS: [
+            {**v, **values} if v[CONF_VALID_FROM] == target else v
+            for v in data[CONF_VERSIONS]
+        ],
+    }
+
+
 def _format_price(value: float | None) -> str:
     return "-" if value is None else f"{value:g}"
 
 
 def _version_label(valid_from: str, prices: Mapping[str, Any]) -> str:
-    """E.g. "2027-01-01: AC 0.62 / DC 0.72 + 12.99" (+ = monthly fee)."""
+    """E.g. "2027-01-01: AC 0.62 / DC 0.72 + 12.99 (0.59 / 0.79)".
+
+    "+" is the monthly fee, the brackets hold the reference prices.
+    """
     label = (
         f"{valid_from}: AC {_format_price(prices.get(CONF_PRICE_AC))}"
         f" / DC {_format_price(prices.get(CONF_PRICE_DC))}"
     )
     if prices.get(CONF_MONTHLY_FEE) is not None:
         label += f" + {_format_price(prices[CONF_MONTHLY_FEE])}"
+    ref_ac, ref_dc = (
+        prices.get(CONF_REFERENCE_PRICE_AC),
+        prices.get(CONF_REFERENCE_PRICE_DC),
+    )
+    if ref_ac is not None or ref_dc is not None:
+        label += f" ({_format_price(ref_ac)} / {_format_price(ref_dc)})"
     return label

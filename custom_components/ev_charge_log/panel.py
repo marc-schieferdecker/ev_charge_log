@@ -24,7 +24,13 @@ from homeassistant.util.hass_dict import HassKey
 
 from .const import DOMAIN, PANEL_URL_PATH
 from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
-from .models import Session, month_of, month_totals
+from .models import (
+    Session,
+    TariffMonthRow,
+    month_of,
+    month_totals,
+    tariff_month_stats,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +39,8 @@ PANEL_ICON = "mdi:ev-station"
 STATIC_URL = "/ev_charge_log_static"
 WS_TYPE = f"{DOMAIN}/panel"
 WS_HISTORY_TYPE = f"{DOMAIN}/panel_history"
+WS_TARIFF_STATS_TYPE = f"{DOMAIN}/panel_tariff_stats"
+_MONTH = vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
 
@@ -102,6 +110,17 @@ TEXT_KEYS = (
     "panel_delete",
     "panel_delete_confirm",
     "panel_cancel",
+    "panel_tariff_stats",
+    "panel_tariff_col_tariff",
+    "panel_tariff_col_sessions",
+    "panel_tariff_col_energy",
+    "panel_tariff_col_cost",
+    "panel_tariff_col_fee",
+    "panel_tariff_col_saving",
+    "panel_tariff_without",
+    "panel_tariff_total",
+    "panel_tariff_current_month",
+    "panel_tariff_empty",
 )
 SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
@@ -129,6 +148,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         )
         websocket_api.async_register_command(hass, websocket_panel)
         websocket_api.async_register_command(hass, websocket_history)
+        websocket_api.async_register_command(hass, websocket_tariff_stats)
         websocket_api.async_register_command(hass, websocket_set_soc)
         hass.data[_SETUP_DONE] = True
 
@@ -174,7 +194,7 @@ async def websocket_panel(
     {
         vol.Required("type"): WS_HISTORY_TYPE,
         vol.Required("vehicle_id"): str,
-        vol.Required("month"): vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$"),
+        vol.Required("month"): _MONTH,
     }
 )
 @callback
@@ -191,6 +211,23 @@ def websocket_history(
     connection.send_result(
         msg["id"], vehicle_history(coord, msg["vehicle_id"], msg["month"])
     )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): WS_TARIFF_STATS_TYPE, vol.Required("month"): _MONTH}
+)
+@callback
+def websocket_tariff_stats(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Tariff statistics of all vehicles in one calendar month (paging)."""
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None:
+        connection.send_error(msg["id"], "not_found", "Not loaded")
+        return
+    connection.send_result(msg["id"], tariff_stats(coord, msg["month"]))
 
 
 _SOC_VALUE = vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100)))
@@ -224,6 +261,47 @@ def websocket_set_soc(
     connection.send_result(msg["id"])
 
 
+def _local_day(session: Session) -> date:
+    return dt_util.as_local(session.timestamp).date()
+
+
+def _row_data(row: TariffMonthRow) -> dict[str, Any]:
+    return {
+        "tariff_id": row.tariff_id,
+        "name": row.name,
+        "sessions": row.session_count,
+        "energy": row.energy_kwh,
+        "cost": row.cost,
+        "fee": row.fee,
+        "saving": row.saving,
+    }
+
+
+def tariff_stats(coord: EvChargeLogCoordinator, month: str) -> dict[str, Any]:
+    """Sessions, energy, cost, fee and savings per tariff in a calendar month.
+
+    Over all vehicles. `tariff_id` None is the row "without tariff"; the
+    first month (oldest session or fee) and the current month tell the panel
+    when to disable "<" and ">".
+    """
+    sessions = coord.log.sessions()
+    fees = coord.log.fees()
+    current = month_of(dt_util.now().date())
+    firsts = [current]
+    if sessions:
+        firsts.append(month_of(_local_day(sessions[0])))
+    if fees:
+        firsts.append(fees[0].month)
+    stats = tariff_month_stats(sessions, fees, coord.tariffs, month, _local_day)
+    return {
+        "month": month,
+        "first_month": min(firsts),
+        "current_month": current,
+        "rows": [_row_data(row) for row in stats.rows],
+        "total": _row_data(stats.total),
+    }
+
+
 def vehicle_history(
     coord: EvChargeLogCoordinator, vehicle_id: str, month: str
 ) -> dict[str, Any]:
@@ -233,14 +311,10 @@ def vehicle_history(
     month, so the panel knows when to disable "<" and ">". Monthly fees are
     not included.
     """
-
-    def local_day(session: Session) -> date:
-        return dt_util.as_local(session.timestamp).date()
-
     sessions = coord.log.sessions(vehicle_id=vehicle_id)
     current = month_of(dt_util.now().date())
-    first = month_of(local_day(sessions[0])) if sessions else current
-    totals = month_totals(sessions, month, local_day)
+    first = month_of(_local_day(sessions[0])) if sessions else current
+    totals = month_totals(sessions, month, _local_day)
     return {
         "month": month,
         "first_month": min(first, current),
@@ -386,6 +460,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
     return {
         "vehicles": vehicles,
         "tariffs": tariffs,
+        "tariff_stats": tariff_stats(coord, current_month) if coord else None,
         "config_url": f"/config/integrations/integration/{DOMAIN}",
         "texts": texts,
         "errors": errors,

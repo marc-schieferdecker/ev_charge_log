@@ -152,6 +152,9 @@ async def test_add_tariff_with_fee(hass: HomeAssistant) -> None:
             "fee_start": "2026-11-20",
         },
     )
+    # A tariff with a fee asks for the reference prices (optional).
+    assert result["step_id"] == "reference"
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     coord = tariffs.runtime_data
@@ -204,6 +207,8 @@ async def test_new_fee_version_applies_from_next_month(
         result["flow_id"],
         {"valid_from": "2026-12-01", "price_dc": 0.72, "monthly_fee": 12.99},
     )
+    assert result["step_id"] == "reference"
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.ABORT
     await hass.async_block_till_done()
 

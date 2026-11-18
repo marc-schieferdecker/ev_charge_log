@@ -523,3 +523,133 @@ async def test_edit_corrects_the_version_valid_today(
     data = tariffs.subentries["enbw"].data
     assert data["price_ac"] == 0.59  # base untouched
     assert [v["price_ac"] for v in data["versions"]] == [0.63, 0.65]
+
+
+# --- reference prices (stage 4) -------------------------------------------------
+
+
+def _suggested(result) -> dict[str, Any]:
+    return {
+        str(k): k.description["suggested_value"]
+        for k in result["data_schema"].schema
+        if k.description and "suggested_value" in k.description
+    }
+
+
+async def test_add_tariff_with_fee_asks_for_reference_prices(
+    hass: HomeAssistant, tariffs
+) -> None:
+    result = await _start(hass, tariffs, "tariff")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            "name": "EWE Go Abo",
+            "price_dc": 0.49,
+            "monthly_fee": 4.99,
+            "fee_vehicle_id": "seal",
+            "fee_start": "2026-11-01",
+        },
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reference"
+    # Only the charge types with a price.
+    assert [str(k) for k in result["data_schema"].schema] == ["reference_price_dc"]
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"reference_price_dc": 0.79}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    data = _sub(tariffs, "EWE Go Abo").data
+    assert (data["reference_price_ac"], data["reference_price_dc"]) == (None, 0.79)
+    coord = tariffs.runtime_data
+    tariff = next(t for t in coord.tariffs.values() if t.name == "EWE Go Abo")
+    assert tariff.reference_price_dc == 0.79
+
+
+async def test_tariff_without_fee_has_no_reference_step(
+    hass: HomeAssistant, tariffs
+) -> None:
+    result = await _menu(hass, tariffs, "enbw", "edit")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "EnBW", "price_ac": 0.59, "price_dc": 0.69}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert "reference_price_ac" not in tariffs.subentries["enbw"].data
+
+
+async def test_edit_suggests_reference_prices_in_effect(
+    hass: HomeAssistant, tariffs, freezer
+) -> None:
+    freezer.move_to("2027-03-01 12:00:00+00:00")
+    edit = await _menu(hass, tariffs, "enbw", "edit")
+    result = await hass.config_entries.subentries.async_configure(
+        edit["flow_id"],
+        {
+            "name": "EnBW",
+            "price_ac": 0.59,
+            "price_dc": 0.69,
+            "monthly_fee": 11.99,
+            "fee_vehicle_id": "seal",
+            "fee_start": "2027-01-01",
+        },
+    )
+    assert result["step_id"] == "reference"
+    await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"reference_price_ac": 0.65, "reference_price_dc": 0.85}
+    )
+
+    # A new version without reference prices keeps the previous ones.
+    result = await _add_price(hass, tariffs, valid_from="2027-02-01", price_dc=0.59)
+    assert result["step_id"] == "reference"
+    assert [str(k) for k in result["data_schema"].schema] == ["reference_price_dc"]
+    assert _suggested(result) == {}
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.ABORT
+    version = tariffs.subentries["enbw"].data["versions"][0]
+    assert (version["reference_price_ac"], version["reference_price_dc"]) == (
+        None,
+        None,
+    )
+    tariff = tariffs.runtime_data.tariffs["enbw"]
+    from datetime import date
+
+    assert tariff.reference_price_on("dc", date(2027, 3, 1)) == 0.85
+
+    # Editing today's version shows the reference price in effect.
+    edit = await _menu(hass, tariffs, "enbw", "edit")
+    values = {k: v for k, v in _suggested(edit).items() if v not in (None, [])}
+    result = await hass.config_entries.subentries.async_configure(
+        edit["flow_id"], values
+    )
+    assert result["step_id"] == "reference"
+    assert _suggested(result)["reference_price_dc"] == 0.85
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"reference_price_dc": 0.89}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    data = tariffs.subentries["enbw"].data
+    assert data["reference_price_dc"] == 0.85  # base untouched
+    assert data["versions"][0]["reference_price_dc"] == 0.89
+
+
+async def test_edit_menu_lists_reference_prices(hass: HomeAssistant) -> None:
+    _, tariffs = await setup_entries(
+        hass,
+        [
+            make_subentry(
+                "tariff",
+                "abo",
+                "EnBW L",
+                price_dc=0.49,
+                monthly_fee=11.99,
+                fee_vehicle_id="seal",
+                fee_start="2026-01-01",
+                reference_price_dc=0.79,
+            ),
+            make_subentry("vehicle", "seal", "Seal U"),
+        ],
+    )
+    result = await _start(hass, tariffs, "tariff", "abo")
+    assert (
+        result["description_placeholders"]["prices"]
+        == "—: AC - / DC 0.49 + 11.99 (- / 0.79)"
+    )

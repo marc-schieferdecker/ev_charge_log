@@ -51,6 +51,9 @@ CONF_MONTHLY_FEE: Final = "monthly_fee"
 CONF_FEE_VEHICLE_ID: Final = "fee_vehicle_id"
 CONF_FEE_START: Final = "fee_start"
 CONF_FEE_END: Final = "fee_end"
+# Stage 4: prices without subscription (tariff statistics, savings)
+CONF_REFERENCE_PRICE_AC: Final = "reference_price_ac"
+CONF_REFERENCE_PRICE_DC: Final = "reference_price_dc"
 
 ZONE_HOME: Final = "zone.home"
 

@@ -52,7 +52,10 @@ Two entries are created:
   A tariff can have a **monthly fee**: choose the vehicle that carries it
   and the first (and optionally last) month. It is booked automatically for
   every started month and included in the vehicle's total cost and average
-  price; a separate sensor shows the fees.
+  price; a separate sensor shows the fees. For a tariff with a monthly fee
+  you can also enter **reference prices**: what you would pay per kWh
+  without the subscription (e.g. the ad hoc price). The Charging log page
+  uses them to show whether the subscription pays off.
 
   When a provider changes its prices, edit the tariff and choose **New
   prices from a date**. Sessions are booked with the prices valid on their
@@ -124,6 +127,13 @@ fees; browse with `<` and `>`), a card with the input fields to log a session an
 the vehicle's statistics, and a list of the sessions. Tap a session to
 correct or delete it. Without vehicles it links to the integration
 settings.
+
+Below the vehicles, a table shows per month and tariff (all vehicles
+together): sessions, kWh, cost, monthly fee and the **savings** of the
+subscription, i.e. energy × reference price − cost − monthly fee. Sessions
+of a charge type without a reference price count without savings; the
+result may be negative. Sessions without a tariff or of a deleted tariff
+are shown as "No tariff".
 
 You can also use the entities on your own dashboards. Every vehicle gets
 input entities to book a session:
