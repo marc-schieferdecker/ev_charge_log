@@ -480,3 +480,25 @@ async def test_panel_tariff_stats_websocket(
         {"type": "ev_charge_log/panel_tariff_stats", "month": "2026-13"}
     )
     assert not (await client.receive_json())["success"]
+
+
+async def test_panel_marks_vehicle_with_pending_charge(hass: HomeAssistant) -> None:
+    from datetime import UTC, datetime
+
+    from custom_components.ev_charge_log.detection import (
+        DetectionState,
+        PendingCharge,
+    )
+
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    ended = datetime(2026, 11, 18, 7, 30, tzinfo=UTC)
+    coord.detection["dolphin"] = DetectionState(
+        last_state="off",
+        pending=PendingCharge(
+            started_at=None, ended_at=ended, soc_start=20.0, soc_end=80.0
+        ),
+    )
+    result = await async_panel_data(hass)
+    pending = {v["id"]: v["pending_ended_at"] for v in result["vehicles"]}
+    assert pending == {"dolphin": ended.isoformat(), "seal": None}

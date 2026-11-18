@@ -422,6 +422,8 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
     tariffs = []
     if coord is not None:
         for vehicle in sorted(coord.vehicles.values(), key=lambda v: v.name.casefold()):
+            detected = coord.detection.get(vehicle.id)
+            pending = detected.pending if detected else None
             vehicles.append(
                 {
                     "id": vehicle.id,
@@ -433,6 +435,11 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "last": entities(vehicle.id, LAST_ENTITIES),
                     "history": vehicle_history(coord, vehicle.id, current_month),
                     "sessions": sessions(vehicle.id),
+                    # A detected charge not booked yet: the form preselects
+                    # this vehicle (the latest one if several).
+                    "pending_ended_at": pending.ended_at.isoformat()
+                    if pending
+                    else None,
                     # The panel redraws the chart when one of these changes.
                     "watch": [
                         row["entity"] for row in entities(vehicle.id, WATCH_ENTITIES)

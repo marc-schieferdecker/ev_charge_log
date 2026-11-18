@@ -121,15 +121,16 @@ you enter by hand always win.
 
 ### Dashboard
 
-EV Charge Log adds a **Charging log** page to the sidebar. Per vehicle it
-shows a monthly chart (energy and cost per charging day, without monthly
-fees; browse with `<` and `>`), a card with the input fields to log a session and
-the vehicle's statistics, and a list of the sessions. Tap a session to
-correct or delete it. Without vehicles it links to the integration
-settings.
+EV Charge Log adds a **Charging log** page to the sidebar. On top it shows
+the tariff statistics and one form to log a session for all vehicles
+(choose the vehicle with the buttons; a vehicle with a detected charge that
+is not booked yet is preselected). Below, per vehicle, a monthly chart
+(energy and cost per charging day, without monthly fees; browse with `<`
+and `>`), the vehicle's statistics and a list of the sessions. Tap a
+session to correct or delete it. Without vehicles it links to the
+integration settings.
 
-Below the vehicles, a table shows per month and tariff (all vehicles
-together): sessions, kWh, cost, monthly fee and the **savings** of the
+The tariff statistics show per month and tariff (all vehicles together): sessions, kWh, cost, monthly fee and the **savings** of the
 subscription, i.e. energy × reference price − cost − monthly fee. Sessions
 of a charge type without a reference price count without savings; the
 result may be negative. Sessions without a tariff or of a deleted tariff

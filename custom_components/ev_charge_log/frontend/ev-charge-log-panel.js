@@ -1,5 +1,6 @@
-// EV Charge Log sidebar panel: per vehicle a chart of the last 30 days and
-// a card with the input fields and statistics.
+// EV Charge Log sidebar panel: on top the tariff statistics and one booking
+// form for all vehicles, below per vehicle a monthly chart, the statistics
+// and the list of sessions.
 //
 // Plain JavaScript custom element (no build step). The backend command
 // "ev_charge_log/panel" returns the vehicles with their entity IDs, the
@@ -43,7 +44,7 @@ const STYLE = `
   .chart-header {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
     margin-bottom: 8px;
   }
@@ -193,27 +194,34 @@ const STYLE = `
   .session-values {
     text-align: right;
   }
+  /* Header row of a card: title left, "<" ">" right. */
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 16px 8px;
+    min-height: 32px;
+  }
+  .card-head .list-title {
+    padding: 0;
+    min-width: 0;
+  }
   .pager {
     display: flex;
-    justify-content: center;
-    gap: 16px;
-    padding: 8px 16px 0;
-    border-top: 1px solid var(--divider-color);
+    flex-shrink: 0;
+    gap: 8px;
   }
   .pager button {
-    min-width: 40px;
-    padding: 4px 12px;
+    min-width: 32px;
+    padding: 2px 8px;
     border: 1px solid var(--divider-color);
     border-radius: 6px;
     background: none;
     color: var(--primary-color);
     font: inherit;
-    font-size: 18px;
+    font-size: 16px;
     cursor: pointer;
-  }
-  .chart-pager {
-    margin-top: 12px;
-    padding-bottom: 0;
   }
   .pager button:disabled {
     color: var(--disabled-text-color, var(--secondary-text-color));
@@ -309,16 +317,72 @@ const STYLE = `
     opacity: 0.5;
     cursor: default;
   }
-  /* Tariff statistics below the vehicles: centered, as wide as one vehicle
-     column (width set from the first column, see _observeWidth). */
-  .tariff-card {
-    grid-column: 1 / -1;
-    justify-self: center;
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
+  /* Top row: tariff statistics left, the booking form right. Same columns
+     as the vehicle grid below; both cards as high as the higher one. */
+  .top-wrap {
+    container-type: inline-size;
+  }
+  .top {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+    gap: 16px;
+    padding: 16px 16px 0;
+    align-items: stretch;
+  }
+  /* One column (2 x 480px + gap + padding do not fit): form first. */
+  @container (max-width: 1007.98px) {
+    .input-card {
+      order: -1;
+    }
+  }
+  .top-card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .input-header {
+    padding-top: 16px;
+  }
+  .input-header .list-title {
+    padding-bottom: 0;
+  }
+  .vehicle-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px 0;
+  }
+  .vehicle-toggle button {
+    padding: 6px 16px;
+    border: 1px solid var(--divider-color);
+    border-radius: 18px;
+    background: none;
+    color: var(--primary-text-color);
+    font: inherit;
+    cursor: pointer;
+  }
+  .vehicle-toggle button.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: var(--text-primary-color, #fff);
+  }
+  .input-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  .input-pane[hidden] {
+    display: none;
+  }
+  /* The book button sits at the bottom of the (stretched) card. */
+  .input-pane .book {
+    margin-top: auto;
+    padding-bottom: 16px;
   }
   .tariff-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
     padding: 16px 0 8px;
   }
   .tariff-scroll {
@@ -386,6 +450,8 @@ const DOMAIN = "ev_charge_log";
 const MODULE_VERSION = new URL(import.meta.url).searchParams.get("v");
 const PAGE_SIZE = 5;
 const SOC_ROW = "ev-charge-log-soc-row";
+// Vehicle chosen last in the booking form (per browser).
+const VEHICLE_KEY = "ev_charge_log_vehicle";
 
 class EvChargeLogPanel extends HTMLElement {
   constructor() {
@@ -557,7 +623,18 @@ class EvChargeLogPanel extends HTMLElement {
       this.shadowRoot.insertBefore(hint, content);
     }
 
-    content.className = "content";
+    // Top row (tariff statistics left, one booking form right), below it one
+    // column per vehicle. Both grids share the column widths.
+    content.className = "page";
+    const topWrap = document.createElement("div");
+    topWrap.className = "top-wrap";
+    const top = document.createElement("div");
+    top.className = "top";
+    topWrap.appendChild(top);
+    const columns = document.createElement("div");
+    columns.className = "content";
+    content.append(topWrap, columns);
+
     // Short row names; without a name the entity's own name is used. The SoC
     // row is our own row element with both fields side by side.
     const row = (r) => {
@@ -582,20 +659,6 @@ class EvChargeLogPanel extends HTMLElement {
       this._fillChartCard(chart, vehicle, data);
       this._charts.set(vehicle.id, chart);
 
-      // Input card: the entities card inside our frame, with the own "book"
-      // button (right-aligned) below the input fields.
-      const card = document.createElement("ha-card");
-      const inputCard = helpers.createCardElement({
-        type: "entities",
-        title: `${vehicle.name} · ${data.texts.panel_input}`,
-        entities: vehicle.input.map(row),
-      });
-      this._embedCard(inputCard);
-      inputCard.hass = this._hass;
-      this._cards.push(inputCard);
-      card.appendChild(inputCard);
-      if (vehicle.book) card.appendChild(this._bookButton(vehicle, data));
-
       // Statistics: an own, ordinary entities card.
       const statsCard = helpers.createCardElement({
         type: "entities",
@@ -614,29 +677,104 @@ class EvChargeLogPanel extends HTMLElement {
       this._fillSessionList(list, vehicle, data);
       this._lists.set(vehicle.id, list);
 
-      column.append(chart, card, statsCard, list);
-      content.appendChild(column);
+      column.append(chart, statsCard, list);
+      columns.appendChild(column);
     }
 
     if (data.tariff_stats) {
-      const footer = document.createElement("ha-card");
-      footer.className = "tariff-card";
-      this._fillTariffStats(footer, data, data.tariff_stats);
-      this._tariffCard = footer;
-      content.appendChild(footer);
-      this._observeWidth(content, footer);
+      const tariffCard = document.createElement("ha-card");
+      tariffCard.className = "top-card tariff-card";
+      this._fillTariffStats(tariffCard, data, data.tariff_stats);
+      this._tariffCard = tariffCard;
+      top.appendChild(tariffCard);
     }
+    top.appendChild(this._inputCard(helpers, data, row));
   }
 
-  _observeWidth(content, footer) {
-    // As wide as one vehicle column (the grid columns share the width).
-    if (this._resize) this._resize.disconnect();
-    if (!window.ResizeObserver) return;
-    this._resize = new ResizeObserver(() => {
-      const column = content.querySelector(".column");
-      if (column) footer.style.width = `${column.getBoundingClientRect().width}px`;
-    });
-    this._resize.observe(content);
+  // --- booking form (one for all vehicles) -------------------------------------
+
+  _initialVehicle(vehicles) {
+    // A detected charge not booked yet wins (the latest one), then the
+    // vehicle chosen last in this browser, then the first.
+    const pending = vehicles
+      .filter((v) => v.pending_ended_at)
+      .sort((a, b) => Date.parse(b.pending_ended_at) - Date.parse(a.pending_ended_at));
+    if (pending.length) return pending[0].id;
+    let stored = null;
+    try {
+      stored = window.localStorage.getItem(VEHICLE_KEY);
+    } catch (err) {
+      // No storage (private window): just use the first vehicle.
+    }
+    if (vehicles.some((v) => v.id === stored)) return stored;
+    return vehicles[0].id;
+  }
+
+  _inputCard(helpers, data, row) {
+    // Every vehicle keeps its own input entities; the form shows the ones of
+    // the selected vehicle. All entities cards are built once and hidden.
+    const vehicles = data.vehicles;
+    const card = document.createElement("ha-card");
+    card.className = "top-card input-card";
+    const header = document.createElement("div");
+    header.className = "input-header";
+    const title = document.createElement("div");
+    title.className = "list-title";
+    header.appendChild(title);
+    card.appendChild(header);
+
+    const toggles = document.createElement("div");
+    toggles.className = "vehicle-toggle";
+    const panes = new Map();
+    const buttons = new Map();
+    let selected = this._initialVehicle(vehicles);
+
+    const show = (vehicleId) => {
+      selected = vehicleId;
+      for (const [id, pane] of panes) pane.hidden = id !== vehicleId;
+      for (const [id, button] of buttons) {
+        button.classList.toggle("active", id === vehicleId);
+        button.setAttribute("aria-pressed", String(id === vehicleId));
+      }
+      const vehicle = vehicles.find((v) => v.id === vehicleId);
+      title.textContent =
+        vehicles.length > 1
+          ? data.texts.panel_input
+          : `${vehicle.name} · ${data.texts.panel_input}`;
+    };
+
+    for (const vehicle of vehicles) {
+      const pane = document.createElement("div");
+      pane.className = "input-pane";
+      const inputCard = helpers.createCardElement({
+        type: "entities",
+        entities: vehicle.input.map(row),
+      });
+      this._embedCard(inputCard);
+      inputCard.hass = this._hass;
+      this._cards.push(inputCard);
+      pane.appendChild(inputCard);
+      if (vehicle.book) pane.appendChild(this._bookButton(vehicle, data));
+      panes.set(vehicle.id, pane);
+      card.appendChild(pane);
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = vehicle.name;
+      button.addEventListener("click", () => {
+        show(vehicle.id);
+        try {
+          window.localStorage.setItem(VEHICLE_KEY, vehicle.id);
+        } catch (err) {
+          // Not remembered without storage; the form still works.
+        }
+      });
+      buttons.set(vehicle.id, button);
+      toggles.appendChild(button);
+    }
+    if (vehicles.length > 1) header.appendChild(toggles);
+    show(selected);
+    return card;
   }
 
   _embedCard(card) {
@@ -701,10 +839,20 @@ class EvChargeLogPanel extends HTMLElement {
     const body = document.createElement("div");
     body.className = "list-card";
 
-    const title = document.createElement("div");
-    title.className = "list-title";
-    title.textContent = `${vehicle.name} · ${texts.panel_sessions}`;
-    body.appendChild(title);
+    // "<" = back in time (older), ">" = forward in time (newer).
+    const go = (target) => {
+      this._page.set(vehicle.id, target);
+      const current = (this._data || data).vehicles.find((v) => v.id === vehicle.id);
+      this._fillSessionList(card, current || vehicle, this._data || data);
+    };
+    const pager =
+      vehicle.sessions.length > PAGE_SIZE
+        ? this._pager(
+            [texts.panel_older, page >= pages - 1, () => go(page + 1)],
+            [texts.panel_newer, page === 0, () => go(page - 1)]
+          )
+        : null;
+    body.appendChild(this._cardHead(`${vehicle.name} · ${texts.panel_sessions}`, pager));
 
     if (!vehicle.sessions.length) {
       const empty = document.createElement("div");
@@ -768,32 +916,6 @@ class EvChargeLogPanel extends HTMLElement {
     }
     if (visible.length) body.appendChild(table);
 
-    if (vehicle.sessions.length > PAGE_SIZE) {
-      // "<" = back in time (older), ">" = forward in time (newer).
-      const go = (target) => {
-        this._page.set(vehicle.id, target);
-        const current = (this._data || data).vehicles.find((v) => v.id === vehicle.id);
-        this._fillSessionList(card, current || vehicle, this._data || data);
-      };
-      const pager = document.createElement("div");
-      pager.className = "pager";
-      const older = document.createElement("button");
-      older.type = "button";
-      older.textContent = "<";
-      older.title = texts.panel_older;
-      older.setAttribute("aria-label", texts.panel_older);
-      older.disabled = page >= pages - 1;
-      older.addEventListener("click", () => go(page + 1));
-      const newer = document.createElement("button");
-      newer.type = "button";
-      newer.textContent = ">";
-      newer.title = texts.panel_newer;
-      newer.setAttribute("aria-label", texts.panel_newer);
-      newer.disabled = page === 0;
-      newer.addEventListener("click", () => go(page - 1));
-      pager.append(older, newer);
-      body.appendChild(pager);
-    }
     card.appendChild(body);
   }
 
@@ -1100,7 +1222,20 @@ class EvChargeLogPanel extends HTMLElement {
     const title = document.createElement("span");
     title.className = "title";
     title.textContent = `${vehicle.name} · ${this._monthLabel(history.month)}`;
-    header.appendChild(title);
+    // Month paging: "<" = previous month, ">" = next month.
+    const pager = this._pager(
+      [
+        texts.panel_older_month,
+        history.month <= history.first_month,
+        () => this._showMonth(card, vehicle, this._shiftMonth(history.month, -1)),
+      ],
+      [
+        texts.panel_newer_month,
+        history.month >= history.current_month,
+        () => this._showMonth(card, vehicle, this._shiftMonth(history.month, 1)),
+      ]
+    );
+    header.append(title, pager);
     body.appendChild(header);
 
     body.appendChild(
@@ -1128,30 +1263,41 @@ class EvChargeLogPanel extends HTMLElement {
       )
     );
 
-    // Month paging: "<" = previous month, ">" = next month.
-    const pager = document.createElement("div");
-    pager.className = "pager chart-pager";
-    const older = document.createElement("button");
-    older.type = "button";
-    older.textContent = "<";
-    older.title = texts.panel_older_month;
-    older.setAttribute("aria-label", texts.panel_older_month);
-    older.disabled = history.month <= history.first_month;
-    older.addEventListener("click", () =>
-      this._showMonth(card, vehicle, this._shiftMonth(history.month, -1))
-    );
-    const newer = document.createElement("button");
-    newer.type = "button";
-    newer.textContent = ">";
-    newer.title = texts.panel_newer_month;
-    newer.setAttribute("aria-label", texts.panel_newer_month);
-    newer.disabled = history.month >= history.current_month;
-    newer.addEventListener("click", () =>
-      this._showMonth(card, vehicle, this._shiftMonth(history.month, 1))
-    );
-    pager.append(older, newer);
-    body.appendChild(pager);
     card.appendChild(body);
+  }
+
+  // --- card header with paging -------------------------------------------------
+
+  _cardHead(text, pager) {
+    // Title left, "<" ">" right (saves the extra row below the card).
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const title = document.createElement("div");
+    title.className = "list-title";
+    title.textContent = text;
+    head.appendChild(title);
+    if (pager) head.appendChild(pager);
+    return head;
+  }
+
+  _pager(older, newer) {
+    // Each side: [label, disabled, onClick]; "<" goes back in time.
+    const pager = document.createElement("div");
+    pager.className = "pager";
+    for (const [text, [label, disabled, onClick]] of [
+      ["<", older],
+      [">", newer],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.disabled = disabled;
+      button.addEventListener("click", onClick);
+      pager.appendChild(button);
+    }
+    return pager;
   }
 
   // --- tariff statistics ------------------------------------------------------
@@ -1205,10 +1351,22 @@ class EvChargeLogPanel extends HTMLElement {
     card.innerHTML = "";
     const body = document.createElement("div");
     body.className = "tariff-body";
-    const title = document.createElement("div");
-    title.className = "list-title";
-    title.textContent = `${texts.panel_tariff_stats} · ${this._monthLabel(stats.month)}`;
-    body.appendChild(title);
+    // Month paging like the chart: "<" = previous month, ">" = next month.
+    const pager = this._pager(
+      [
+        texts.panel_older_month,
+        stats.month <= stats.first_month,
+        () => this._showTariffMonth(this._shiftMonth(stats.month, -1)),
+      ],
+      [
+        texts.panel_newer_month,
+        stats.month >= stats.current_month,
+        () => this._showTariffMonth(this._shiftMonth(stats.month, 1)),
+      ]
+    );
+    body.appendChild(
+      this._cardHead(`${texts.panel_tariff_stats} · ${this._monthLabel(stats.month)}`, pager)
+    );
 
     if (!stats.rows.length) {
       const empty = document.createElement("div");
@@ -1268,29 +1426,6 @@ class EvChargeLogPanel extends HTMLElement {
       body.appendChild(hint);
     }
 
-    // Month paging like the chart: "<" = previous month, ">" = next month.
-    const pager = document.createElement("div");
-    pager.className = "pager chart-pager";
-    const older = document.createElement("button");
-    older.type = "button";
-    older.textContent = "<";
-    older.title = texts.panel_older_month;
-    older.setAttribute("aria-label", texts.panel_older_month);
-    older.disabled = stats.month <= stats.first_month;
-    older.addEventListener("click", () =>
-      this._showTariffMonth(this._shiftMonth(stats.month, -1))
-    );
-    const newer = document.createElement("button");
-    newer.type = "button";
-    newer.textContent = ">";
-    newer.title = texts.panel_newer_month;
-    newer.setAttribute("aria-label", texts.panel_newer_month);
-    newer.disabled = stats.month >= stats.current_month;
-    newer.addEventListener("click", () =>
-      this._showTariffMonth(this._shiftMonth(stats.month, 1))
-    );
-    pager.append(older, newer);
-    body.appendChild(pager);
     card.appendChild(body);
   }
 
