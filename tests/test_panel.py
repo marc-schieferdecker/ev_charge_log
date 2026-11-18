@@ -236,6 +236,8 @@ async def test_panel_lists_sessions_newest_first(hass: HomeAssistant) -> None:
                 tariff_id="enbw",
                 cost=1.5 if day == 12 else None,
                 note="A7" if day == 12 else None,
+                soc_start=33.0 if day == 11 else None,
+                soc_end=77.0 if day in (11, 12) else None,
             )
         )
 
@@ -251,7 +253,13 @@ async def test_panel_lists_sessions_newest_first(hass: HomeAssistant) -> None:
     assert newest["cost"] == 1.5
     assert newest["cost_overridden"] is True
     assert newest["note"] == "A7"
+    assert newest["soc_start"] is None
+    assert newest["soc_end"] == 77.0
+    assert seal["sessions"][1]["soc_start"] == 33.0
+    assert seal["sessions"][1]["soc_end"] == 77.0
     assert seal["sessions"][-1]["energy_kwh"] == 1.0
+    assert seal["sessions"][-1]["soc_start"] is None
+    assert seal["sessions"][-1]["soc_end"] is None
 
     assert result["tariffs"] == [
         {"id": "enbw", "name": "EnBW", "device_id": result["tariffs"][0]["device_id"]}

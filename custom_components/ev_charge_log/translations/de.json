@@ -227,6 +227,7 @@
     "panel_chart_cost": { "message": "Kosten (ohne Grundgebühren)" },
     "panel_sessions": { "message": "Ladungen" },
     "panel_no_sessions": { "message": "Noch keine Ladungen." },
+    "panel_soc": { "message": "SoC" },
     "panel_older": { "message": "Ältere Ladungen" },
     "panel_older_month": { "message": "Vormonat" },
     "panel_newer_month": { "message": "Folgemonat" },

@@ -76,6 +76,7 @@ TEXT_KEYS = (
     "panel_chart_cost",
     "panel_sessions",
     "panel_no_sessions",
+    "panel_soc",
     "panel_older",
     "panel_older_month",
     "panel_newer_month",
@@ -279,6 +280,8 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "cost": session.cost,
                     "cost_overridden": session.cost_overridden,
                     "note": session.note,
+                    "soc_start": session.soc_start,
+                    "soc_end": session.soc_end,
                 }
             )
         return rows

@@ -143,10 +143,33 @@ const STYLE = `
     padding: 0 16px 8px;
     color: var(--secondary-text-color);
   }
+  /* Rows share the columns of the table (subgrid), so the SoC column
+     lines up across rows. */
+  .session-table {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .session-table.with-soc {
+    grid-template-columns: 1fr auto auto;
+  }
+  .session-head,
   button.session {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    column-gap: 16px;
     align-items: center;
+  }
+  .session-head {
+    padding: 0 16px 4px;
+    font-size: 13px;
+    color: var(--secondary-text-color);
+  }
+  .session-soc {
+    text-align: center;
+    white-space: nowrap;
+  }
+  button.session {
     width: 100%;
     padding: 8px 16px;
     border: none;
@@ -578,6 +601,20 @@ class EvChargeLogPanel extends HTMLElement {
     }
 
     const visible = vehicle.sessions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+    // SoC column only when a session on this page has a SoC value.
+    const hasSoc = (s) => s.soc_start != null || s.soc_end != null;
+    const withSoc = visible.some(hasSoc);
+    const table = document.createElement("div");
+    table.className = withSoc ? "session-table with-soc" : "session-table";
+    if (withSoc) {
+      const head = document.createElement("div");
+      head.className = "session-head";
+      const socHead = document.createElement("div");
+      socHead.className = "session-soc";
+      socHead.textContent = texts.panel_soc;
+      head.append(document.createElement("div"), socHead, document.createElement("div"));
+      table.appendChild(head);
+    }
     for (const session of visible) {
       const row = document.createElement("button");
       row.className = "session";
@@ -601,10 +638,22 @@ class EvChargeLogPanel extends HTMLElement {
       cost.className = "session-sub";
       cost.textContent = this._money(session.cost, data.currency);
       right.append(energy, cost);
-      row.append(left, right);
+      row.append(left);
+      if (withSoc) {
+        // "33 → 55", "→ 77", "33 →" or empty.
+        const soc = document.createElement("div");
+        soc.className = "session-soc";
+        if (hasSoc(session)) {
+          const value = (v) => (v == null ? "" : this._number(v, 1));
+          soc.textContent = `${value(session.soc_start)} → ${value(session.soc_end)}`.trim();
+        }
+        row.append(soc);
+      }
+      row.append(right);
       row.addEventListener("click", () => this._openDialog(vehicle, session));
-      body.appendChild(row);
+      table.appendChild(row);
     }
+    if (visible.length) body.appendChild(table);
 
     if (vehicle.sessions.length > PAGE_SIZE) {
       // "<" = back in time (older), ">" = forward in time (newer).
