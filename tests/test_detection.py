@@ -148,3 +148,38 @@ def test_no_detection_only_current_soc() -> None:
         None,
         None,
     )
+
+
+def test_backdated_booking_takes_no_current_soc() -> None:
+    defaults = booking_defaults(DetectionState(), soc_now=39, backdated=True)
+    assert not defaults.from_detection
+    assert (defaults.timestamp, defaults.soc_start, defaults.soc_end) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_backdated_booking_ignores_running_charge() -> None:
+    state, _ = _run([("off", 30), ("on", 31)])
+    defaults = booking_defaults(state, soc_now=55, backdated=True)
+    assert not defaults.from_detection
+    assert (defaults.soc_start, defaults.soc_end) == (None, None)
+
+
+def test_backdated_booking_still_takes_pending_charge() -> None:
+    state, _ = _run([("off", 30), ("on", 31), ("off", 80)])
+    defaults = booking_defaults(state, soc_now=70, backdated=True)
+    assert defaults.from_detection
+    assert (defaults.soc_start, defaults.soc_end) == (31, 80)
+
+
+def test_booking_before_pending_day_leaves_pending_charge() -> None:
+    state, _ = _run([("off", 30), ("on", 31), ("off", 80)])
+    defaults = booking_defaults(state, soc_now=70, backdated=True, before_pending=True)
+    assert not defaults.from_detection
+    assert (defaults.timestamp, defaults.soc_start, defaults.soc_end) == (
+        None,
+        None,
+        None,
+    )

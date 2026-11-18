@@ -760,7 +760,18 @@ class EvChargeLogCoordinator:
         self._require_vehicle(data.vehicle_id)
         vehicle = self.vehicles[data.vehicle_id]
         current = self.detection.get(data.vehicle_id, DetectionState())
-        defaults = booking_defaults(current, self._soc(vehicle))
+        # A session entered later for an earlier day must not get today's SoC,
+        # nor take over a detected charge that ended on a later day.
+        day = dt_util.as_local(data.timestamp).date() if timestamp_given else None
+        backdated = day is not None and day < dt_util.now().date()
+        before_pending = (
+            day is not None
+            and current.pending is not None
+            and day < dt_util.as_local(current.pending.ended_at).date()
+        )
+        defaults = booking_defaults(
+            current, self._soc(vehicle), backdated, before_pending
+        )
         timestamp = (
             defaults.timestamp
             if defaults.timestamp is not None and not timestamp_given

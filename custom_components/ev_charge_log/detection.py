@@ -178,19 +178,35 @@ class BookingDefaults:
     from_detection: bool
 
 
-def booking_defaults(current: DetectionState, soc_now: float | None) -> BookingDefaults:
+def booking_defaults(
+    current: DetectionState,
+    soc_now: float | None,
+    backdated: bool = False,
+    before_pending: bool = False,
+) -> BookingDefaults:
     """Defaults for the next booking.
 
-    - Pending charge: its end time and both SoC values.
+    `backdated`: the booking is for a day before today. `before_pending`: it
+    is for a day before the end of the pending charge, so it is another,
+    older charge (e.g. a receipt entered later).
+
+    - Pending charge, booking not before its day: its end time and both SoC
+      values.
+    - Backdated booking: nothing. The current SoC and a running charge belong
+      to today; a pending charge of a later day stays pending.
     - Charging right now: the remembered start SoC and the current SoC.
     - Otherwise: only the current SoC as end SoC.
     """
-    if current.pending is not None:
+    if current.pending is not None and not before_pending:
         return BookingDefaults(
             timestamp=current.pending.ended_at,
             soc_start=current.pending.soc_start,
             soc_end=current.pending.soc_end,
             from_detection=True,
+        )
+    if backdated:
+        return BookingDefaults(
+            timestamp=None, soc_start=None, soc_end=None, from_detection=False
         )
     if current.charging and not current.booked_while_charging:
         return BookingDefaults(

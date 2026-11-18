@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -11,6 +11,7 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_capture_events,
@@ -354,3 +355,131 @@ async def test_notification_in_german(hass: HomeAssistant, entry) -> None:
     note = _notifications(hass)["ev_charge_log_charge_seal"]
     assert note["title"] == "Seal U hat fertig geladen"
     assert "Ladung eintragen" in note["message"]
+
+
+# --- SoC by hand and backdated bookings ------------------------------------------
+
+
+async def test_backdated_dashboard_booking_takes_no_current_soc(
+    hass: HomeAssistant, entry
+) -> None:
+    yesterday = (dt_util.now().date() - timedelta(days=1)).isoformat()
+    await hass.services.async_call(
+        "date",
+        "set_value",
+        {"entity_id": _entity(hass, "date", "seal", "input_date"), "date": yesterday},
+        blocking=True,
+    )
+    await _book_dashboard(hass, "seal", 10)
+    session = entry.runtime_data.log.last_session("seal")
+    assert (session.soc_start, session.soc_end) == (None, None)
+    assert session.source == "manual"
+
+
+async def test_dashboard_booking_for_today_takes_current_soc(
+    hass: HomeAssistant, entry
+) -> None:
+    today = dt_util.now().date().isoformat()
+    await hass.services.async_call(
+        "date",
+        "set_value",
+        {"entity_id": _entity(hass, "date", "seal", "input_date"), "date": today},
+        blocking=True,
+    )
+    await _book_dashboard(hass, "seal", 10)
+    session = entry.runtime_data.log.last_session("seal")
+    assert session.soc_end == 30.0
+
+
+async def test_backdated_action_while_charging_keeps_charge_open(
+    hass: HomeAssistant, entry
+) -> None:
+    events = async_capture_events(hass, EVENT_CHARGING_FINISHED)
+    await _states(hass, (SOC, "31"), (CHARGING, "on"))
+    device = (
+        er.async_get(hass).async_get(_entity(hass, "button", "seal", "book")).device_id
+    )
+    result = await hass.services.async_call(
+        DOMAIN,
+        "add_session",
+        {
+            "vehicle": device,
+            "energy_kwh": 12,
+            "cost": 5,
+            "timestamp": (dt_util.now() - timedelta(days=3)).isoformat(),
+        },
+        blocking=True,
+        return_response=True,
+    )
+    session = result["session"]
+    assert (session["soc_start"], session["soc_end"]) == (None, None)
+    assert session["source"] == "manual"
+
+    # The running charge was not taken over: its end still reminds.
+    await _states(hass, (SOC, "80"), (CHARGING, "off"))
+    assert len(events) == 1
+    assert (events[0].data["soc_start"], events[0].data["soc_end"]) == (31.0, 80.0)
+
+
+async def test_older_receipt_does_not_take_over_pending_charge(
+    hass: HomeAssistant, entry
+) -> None:
+    await _charge(hass, "31", "80")
+    coord = entry.runtime_data
+    device = (
+        er.async_get(hass).async_get(_entity(hass, "button", "seal", "book")).device_id
+    )
+    # A receipt of an older charge, entered while the detected one is open.
+    older = await hass.services.async_call(
+        DOMAIN,
+        "add_session",
+        {
+            "vehicle": device,
+            "energy_kwh": 25,
+            "cost": 12,
+            "timestamp": (dt_util.now() - timedelta(days=8)).isoformat(),
+        },
+        blocking=True,
+        return_response=True,
+    )
+    assert (older["session"]["soc_start"], older["session"]["soc_end"]) == (
+        None,
+        None,
+    )
+    assert older["session"]["source"] == "manual"
+    assert coord.detection["seal"].pending is not None  # still waiting
+
+    # The detected charge is still taken over by its own booking.
+    ended = coord.detection["seal"].pending.ended_at
+    await _book_dashboard(hass, "seal", 40)
+    session = max(coord.log.sessions(), key=lambda s: s.timestamp)
+    assert (session.soc_start, session.soc_end) == (31.0, 80.0)
+    assert session.timestamp == ended
+    assert session.source == "reminder"
+    assert coord.detection["seal"].pending is None
+
+
+async def test_booking_dated_on_charge_day_takes_pending_charge(
+    hass: HomeAssistant, entry, freezer
+) -> None:
+    # Charge ends in the evening, booked the next morning dated that day.
+    freezer.move_to("2026-11-17 19:00:00+00:00")
+    await _charge(hass, "31", "80")
+    freezer.move_to("2026-11-18 07:00:00+00:00")
+    await hass.services.async_call(
+        "date",
+        "set_value",
+        {
+            "entity_id": _entity(hass, "date", "seal", "input_date"),
+            "date": dt_util.as_local(
+                entry.runtime_data.detection["seal"].pending.ended_at
+            )
+            .date()
+            .isoformat(),
+        },
+        blocking=True,
+    )
+    await _book_dashboard(hass, "seal", 40)
+    session = entry.runtime_data.log.last_session("seal")
+    assert (session.soc_start, session.soc_end) == (31.0, 80.0)
+    assert session.source == "reminder"
