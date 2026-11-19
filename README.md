@@ -161,6 +161,27 @@ session are shown as well – for display only, never used for costs.
 
 Per tariff: total cost (including its monthly fees) and total energy.
 
+### Statistics (history graphs)
+
+Home Assistant records the sum sensors when their value changes, so a
+session you enter today for last week shows up today in their long-term
+statistics, and a deleted or corrected session shows up as a jump on the day
+of the change.
+
+For history graphs, EV Charge Log therefore keeps its own statistics per
+vehicle, in which every session counts in the hour it took place:
+
+- **<Vehicle> charging energy** (kWh)
+- **<Vehicle> charging cost** (your currency, including monthly fees on the
+  first of the month)
+
+They are rewritten after every change and filled for all existing sessions
+on the first start, so there is nothing to re-enter. Use them in a
+*Statistics graph* card (period day, week or month, stat type *change*)
+instead of the total sensors. The total sensors themselves are unchanged and
+keep their previous statistics. Deleting a vehicle deletes its statistics.
+They need the recorder, which is enabled by default.
+
 ### Actions
 
 | Action | Purpose |

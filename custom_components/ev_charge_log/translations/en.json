@@ -285,6 +285,8 @@
     "panel_label_input_charge_type": { "message": "Charge type" },
     "panel_label_book": { "message": "Book session" },
     "panel_label_reset_input": { "message": "Reset input" },
+    "statistic_energy": { "message": "{vehicle} charging energy" },
+    "statistic_cost": { "message": "{vehicle} charging cost" },
     "reminder_title": { "message": "{vehicle} has finished charging" },
     "reminder_message": {
       "message": "Charging ended at {time}. SoC {soc_start} % → {soc_end} %, tariff: {tariff}.\n\n[Log the session]({url}) – enter the energy from the receipt and press \"Book session\"."

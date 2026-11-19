@@ -1,7 +1,7 @@
 {
   "domain": "ev_charge_log",
   "name": "EV Charge Log",
-  "after_dependencies": ["frontend", "panel_custom"],
+  "after_dependencies": ["frontend", "panel_custom", "recorder"],
   "categories": ["energy.ev_charging", "vehicles_transport.cars_evs"],
   "codeowners": ["@marc-schieferdecker"],
   "config_flow": true,

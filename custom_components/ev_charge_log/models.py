@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -633,6 +633,70 @@ def cost_per_100(
         Decimal(0),
     )
     return round(float(cost) / distance * 100, 2)
+
+
+@dataclass(frozen=True, slots=True)
+class HourlyTotal:
+    """Running totals of a vehicle at the end of an hour (stage 5).
+
+    `start` is the beginning of the hour in UTC. Only hours in which a
+    session or a monthly fee counts have a row.
+    """
+
+    start: datetime
+    energy_kwh: float
+    cost: float
+
+
+def _hour_start(moment: datetime) -> datetime:
+    return moment.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+
+
+def hourly_statistics(
+    sessions: Iterable[Session],
+    fees: Iterable[Fee],
+    vehicle_id: str,
+    tz: tzinfo,
+) -> list[HourlyTotal]:
+    """Running energy and cost totals of a vehicle, per hour of the charge.
+
+    A session counts in the hour of its timestamp, not when it was booked.
+    A monthly fee counts on the first of its month at 00:00 in `tz` (local
+    time of HA). The cost includes the fees, so the last row equals the
+    vehicle's total cost and total energy.
+    """
+    energy: dict[datetime, Decimal] = {}
+    cost: dict[datetime, Decimal] = {}
+
+    def add(moment: datetime, kwh: Decimal, amount: Decimal) -> None:
+        hour = _hour_start(moment)
+        energy[hour] = energy.get(hour, Decimal(0)) + kwh
+        cost[hour] = cost.get(hour, Decimal(0)) + amount
+
+    for session in sessions:
+        if session.vehicle_id == vehicle_id:
+            add(
+                session.timestamp,
+                Decimal(str(session.energy_kwh)),
+                Decimal(str(session.cost)),
+            )
+    for fee in fees:
+        if fee.vehicle_id == vehicle_id:
+            year, month = (int(part) for part in fee.month.split("-"))
+            add(
+                datetime(year, month, 1, tzinfo=tz),
+                Decimal(0),
+                Decimal(str(fee.amount)),
+            )
+
+    rows: list[HourlyTotal] = []
+    energy_sum = Decimal(0)
+    cost_sum = Decimal(0)
+    for hour in sorted(energy):
+        energy_sum += energy[hour]
+        cost_sum += cost[hour]
+        rows.append(HourlyTotal(hour, float(energy_sum), float(cost_sum)))
+    return rows
 
 
 def month_totals(

@@ -30,6 +30,7 @@ from homeassistant.core import (
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_state_change_event,
     async_track_time_change,
 )
@@ -48,6 +49,7 @@ from .const import (
     PANEL_URL_PATH,
     PUSH_ACTION_PREFIX,
     SOURCE_REMINDER,
+    STATISTICS_DELAY,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
     ZONE_HOME,
@@ -67,7 +69,15 @@ from .models import (
     ValidationError,
     Vehicle,
     cost_per_100,
+    hourly_statistics,
     parse_reply,
+)
+from .statistics import (
+    KIND_COST,
+    KIND_ENERGY,
+    async_remove_other_vehicles,
+    async_write_vehicle,
+    recorder_available,
 )
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
 
@@ -149,6 +159,7 @@ class EvChargeLogCoordinator:
         self._detection_lock = asyncio.Lock()
         self._fee_lock = asyncio.Lock()
         self._unsub_fee_timer: CALLBACK_TYPE | None = None
+        self._unsub_statistics: CALLBACK_TYPE | None = None
 
     async def async_load(self) -> None:
         """Load stored sessions and the detection state."""
@@ -211,11 +222,16 @@ class EvChargeLogCoordinator:
             await self._async_save()
         self._async_start_tracking()
         await self.async_book_fees()
+        if recorder_available(self.hass):
+            await async_remove_other_vehicles(self.hass, self.vehicles)
+        # Also fills the statistics for sessions booked before stage 5.
+        self._async_schedule_statistics()
         self._async_notify()
 
     @callback
     def async_clear_vehicles(self) -> None:
         """Forget the vehicles (vehicles entry unloaded)."""
+        self._async_cancel_statistics()
         self._async_stop_tracking()
         self.vehicles = {}
         self.inputs = {}
@@ -340,6 +356,7 @@ class EvChargeLogCoordinator:
     @callback
     def async_shutdown(self) -> None:
         """Stop timers, listeners and state tracking (last entry unloaded)."""
+        self._async_cancel_statistics()
         self._async_stop_tracking()
         for unsub in (self._unsub_fee_timer, self._unsub_push_listener):
             if unsub is not None:
@@ -741,7 +758,45 @@ class EvChargeLogCoordinator:
 
     async def _async_commit(self) -> None:
         await self._async_save()
+        self._async_schedule_statistics()
         self._async_notify()
+
+    # --- statistics in the recorder (stage 5) -------------------------------
+
+    @callback
+    def _async_schedule_statistics(self) -> None:
+        """Rewrite the statistics shortly; several changes are combined."""
+        if not self.vehicles or not recorder_available(self.hass):
+            return
+        self._async_cancel_statistics()
+        self._unsub_statistics = async_call_later(
+            self.hass, STATISTICS_DELAY, self._async_write_statistics
+        )
+
+    @callback
+    def _async_cancel_statistics(self) -> None:
+        if self._unsub_statistics is not None:
+            self._unsub_statistics()
+            self._unsub_statistics = None
+
+    async def _async_write_statistics(self, _now: datetime | None = None) -> None:
+        """Write the hourly statistics of all vehicles from scratch."""
+        self._unsub_statistics = None
+        tz = dt_util.get_default_time_zone()
+        fees = self.log.fees()
+        for vehicle in list(self.vehicles.values()):
+            names = {
+                KIND_ENERGY: await self._async_text(
+                    "statistic_energy", vehicle=vehicle.name
+                ),
+                KIND_COST: await self._async_text(
+                    "statistic_cost", vehicle=vehicle.name
+                ),
+            }
+            rows = hourly_statistics(
+                self.log.sessions(vehicle_id=vehicle.id), fees, vehicle.id, tz
+            )
+            async_write_vehicle(self.hass, vehicle.id, names, rows)
 
     # --- changes ----------------------------------------------------------
 
