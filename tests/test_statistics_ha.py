@@ -275,6 +275,9 @@ async def test_old_ids_and_last_vehicle_removed(hass: HomeAssistant, freezer) ->
         meta(old, "old", "EUR", None),
         [{"start": dt_util.as_utc(_local(2026, 11, 1, 0)), "sum": 1.0}],
     )
+    # Like a statistic of an earlier run: written before the cleanup reads
+    # the existing IDs (otherwise a race with the recorder thread).
+    await async_wait_recording_done(hass)
     await _book(hass, vehicles, "seal")
     await _flush(hass, freezer)
     metadata = await _metadata(hass)
