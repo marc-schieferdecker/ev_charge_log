@@ -32,9 +32,10 @@ from custom_components.ev_charge_log.storage import (
 from .conftest import make_subentry as _sub
 from .conftest import setup_entries
 
-SEAL_ENERGY = f"{DOMAIN}:seal_energy"
-SEAL_COST = f"{DOMAIN}:seal_cost"
-DOLPHIN_COST = f"{DOMAIN}:dolphin_cost"
+SEAL_ENERGY = f"{DOMAIN}:seal_u_charging_energy"
+SEAL_COST = f"{DOMAIN}:seal_u_charging_cost"
+DOLPHIN_COST = f"{DOMAIN}:dolphin_charging_cost"
+DOLPHIN_ENERGY = f"{DOMAIN}:dolphin_charging_energy"
 
 
 @pytest.fixture(autouse=True)
@@ -181,7 +182,7 @@ async def test_existing_sessions_filled_on_load(
     await _setup(hass)
     await _flush(hass, freezer)
     hour = dt_util.as_utc(_local(2026, 3, 4, 7))
-    assert await _rows(hass, f"{DOMAIN}:dolphin_energy") == [(hour, 25.0)]
+    assert await _rows(hass, DOLPHIN_ENERGY) == [(hour, 25.0)]
     assert await _rows(hass, DOLPHIN_COST) == [(hour, 0.0)]
 
 
@@ -208,27 +209,80 @@ async def test_removing_vehicle_removes_its_statistics(
     await _flush(hass, freezer)
     metadata = await _metadata(hass)
     assert DOLPHIN_COST not in metadata
-    assert f"{DOMAIN}:dolphin_energy" not in metadata
+    assert DOLPHIN_ENERGY not in metadata
     assert SEAL_COST in metadata
 
 
-async def test_renaming_vehicle_renames_statistics(
-    hass: HomeAssistant, freezer
-) -> None:
-    vehicles, _ = await _setup(hass)
+async def _book(hass: HomeAssistant, vehicles, vehicle_id: str) -> None:
     await vehicles.runtime_data.async_add_session(
         SessionInput(
-            vehicle_id="seal",
+            vehicle_id=vehicle_id,
             energy_kwh=10.0,
             charge_type="ac",
             timestamp=_local(2026, 11, 14, 9),
             cost=5.0,
         )
     )
+
+
+async def test_renaming_vehicle_changes_id(hass: HomeAssistant, freezer) -> None:
+    """The ID follows the name (the picker only searches IDs)."""
+    vehicles, _ = await _setup(hass)
+    await _book(hass, vehicles, "seal")
     await _flush(hass, freezer)
     hass.config_entries.async_update_subentry(
-        vehicles, vehicles.subentries["seal"], title="Seal"
+        vehicles, vehicles.subentries["seal"], title="BYD Seal U"
     )
     await hass.async_block_till_done()
     await _flush(hass, freezer)
-    assert (await _metadata(hass))[SEAL_COST]["name"] == "Seal charging cost"
+    metadata = await _metadata(hass)
+    assert SEAL_COST not in metadata
+    assert SEAL_ENERGY not in metadata
+    new_cost = f"{DOMAIN}:byd_seal_u_charging_cost"
+    assert metadata[new_cost]["name"] == "BYD Seal U charging cost"
+    hour = dt_util.as_utc(_local(2026, 11, 14, 9))
+    assert await _rows(hass, new_cost) == [(hour, 5.0)]
+
+
+async def test_equal_names_get_unique_ids(hass: HomeAssistant, freezer) -> None:
+    vehicles, _ = await setup_entries(
+        hass,
+        [_sub("vehicle", "a", "Dolphin"), _sub("vehicle", "b", "Dolphin")],
+    )
+    await _book(hass, vehicles, "a")
+    await _book(hass, vehicles, "b")
+    await _flush(hass, freezer)
+    assert set(await _metadata(hass)) == {
+        DOLPHIN_COST,
+        f"{DOLPHIN_COST}_2",
+        DOLPHIN_ENERGY,
+        f"{DOLPHIN_ENERGY}_2",
+    }
+
+
+async def test_old_ids_and_last_vehicle_removed(hass: HomeAssistant, freezer) -> None:
+    """IDs of the first version (vehicle ID) and of the last vehicle go."""
+    from homeassistant.components.recorder.statistics import (
+        async_add_external_statistics,
+    )
+
+    from custom_components.ev_charge_log.statistics import _metadata as meta
+
+    vehicles, _ = await _setup(hass)
+    old = f"{DOMAIN}:seal_cost"
+    async_add_external_statistics(
+        hass,
+        meta(old, "old", "EUR", None),
+        [{"start": dt_util.as_utc(_local(2026, 11, 1, 0)), "sum": 1.0}],
+    )
+    await _book(hass, vehicles, "seal")
+    await _flush(hass, freezer)
+    metadata = await _metadata(hass)
+    assert old not in metadata
+    assert SEAL_COST in metadata
+
+    for vehicle_id in ("seal", "dolphin"):
+        hass.config_entries.async_remove_subentry(vehicles, vehicle_id)
+        await hass.async_block_till_done()
+    await _flush(hass, freezer)
+    assert await _metadata(hass) == {}

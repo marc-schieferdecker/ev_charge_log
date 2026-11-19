@@ -6,11 +6,16 @@ module writes external statistics in which every session counts in the hour
 of its timestamp. They are always rewritten completely per vehicle: cheap
 for a few hundred sessions and correct for corrections and deletions without
 special cases.
+
+The statistic ID is made from the displayed name ("BYD Seal U Ladekosten"
+-> `ev_charge_log:byd_seal_u_ladekosten`): the statistic picker of the HA
+frontend searches external statistics only by ID and integration, not by
+name. Renaming a vehicle therefore changes the ID; statistics under IDs that
+are no longer used are deleted.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from functools import partial
 from typing import cast
@@ -27,6 +32,7 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util import slugify
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from .const import DOMAIN
@@ -40,13 +46,27 @@ KIND_COST = "cost"
 _HAS_UNIT_CLASS = "unit_class" in (
     StatisticMetaData.__required_keys__ | StatisticMetaData.__optional_keys__
 )
-_NOT_SLUG = re.compile(r"[^a-z0-9]+")
 
 
-def statistic_id(vehicle_id: str, kind: str) -> str:
-    """Statistic ID of a vehicle: lowercase, `[a-z0-9_]`, no `__`."""
-    slug = _NOT_SLUG.sub("_", vehicle_id.lower()).strip("_")
-    return f"{DOMAIN}:{slug}_{kind}"
+def statistic_ids[K](names: Mapping[K, str]) -> dict[K, str]:
+    """A unique statistic ID per name, made from the name.
+
+    Keys are processed in sorted order, so equal names always get the same
+    suffixes (`_2`, `_3`, ...). `slugify` gives `[a-z0-9_]` without `__`
+    and never an empty string, as the recorder requires.
+    """
+    result: dict[K, str] = {}
+    used: set[str] = set()
+    for key in sorted(names):
+        base = f"{DOMAIN}:{slugify(names[key])}"
+        stat_id = base
+        number = 2
+        while stat_id in used:
+            stat_id = f"{base}_{number}"
+            number += 1
+        used.add(stat_id)
+        result[key] = stat_id
+    return result
 
 
 def recorder_available(hass: HomeAssistant) -> bool:
@@ -73,17 +93,18 @@ def _metadata(
 @callback
 def async_write_vehicle(
     hass: HomeAssistant,
-    vehicle_id: str,
+    ids: Mapping[str, str],
     names: Mapping[str, str],
     rows: list[HourlyTotal],
 ) -> None:
     """Replace the energy and cost statistics of a vehicle.
 
     Clearing and importing are queued in the recorder and run in order.
-    `names` maps KIND_ENERGY / KIND_COST to the display names.
+    `ids` and `names` map KIND_ENERGY / KIND_COST to the statistic IDs and
+    the display names.
     """
-    energy_id = statistic_id(vehicle_id, KIND_ENERGY)
-    cost_id = statistic_id(vehicle_id, KIND_COST)
+    energy_id = ids[KIND_ENERGY]
+    cost_id = ids[KIND_COST]
     get_instance(hass).async_clear_statistics([energy_id, cost_id])
     if not rows:
         return
@@ -108,16 +129,14 @@ def async_write_vehicle(
     )
 
 
-async def async_remove_other_vehicles(
-    hass: HomeAssistant, vehicle_ids: Iterable[str]
-) -> None:
-    """Delete the statistics of vehicles that no longer exist."""
+async def async_remove_unused(hass: HomeAssistant, used_ids: Iterable[str]) -> None:
+    """Delete our statistics under IDs no longer in use.
+
+    These belong to deleted or renamed vehicles (or to the language before
+    a change of the HA language).
+    """
     instance = get_instance(hass)
-    known = {
-        statistic_id(vehicle_id, kind)
-        for vehicle_id in vehicle_ids
-        for kind in (KIND_ENERGY, KIND_COST)
-    }
+    known = set(used_ids)
     existing = await instance.async_add_executor_job(
         partial(get_metadata, hass, statistic_source=DOMAIN)
     )

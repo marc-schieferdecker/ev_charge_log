@@ -182,6 +182,12 @@ instead of the total sensors. The total sensors themselves are unchanged and
 keep their previous statistics. Deleting a vehicle deletes its statistics.
 They need the recorder, which is enabled by default.
 
+The statistic ID is made from the name (e.g.
+`ev_charge_log:byd_seal_u_charging_cost`), because the statistic picker of
+Home Assistant finds external statistics only by ID, not by name. Renaming
+a vehicle (or changing the Home Assistant language) therefore creates the
+statistics under a new ID; select them again in your cards.
+
 ### Actions
 
 | Action | Purpose |

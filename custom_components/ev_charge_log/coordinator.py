@@ -75,9 +75,10 @@ from .models import (
 from .statistics import (
     KIND_COST,
     KIND_ENERGY,
-    async_remove_other_vehicles,
+    async_remove_unused,
     async_write_vehicle,
     recorder_available,
+    statistic_ids,
 )
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
 
@@ -222,8 +223,6 @@ class EvChargeLogCoordinator:
             await self._async_save()
         self._async_start_tracking()
         await self.async_book_fees()
-        if recorder_available(self.hass):
-            await async_remove_other_vehicles(self.hass, self.vehicles)
         # Also fills the statistics for sessions booked before stage 5.
         self._async_schedule_statistics()
         self._async_notify()
@@ -765,8 +764,12 @@ class EvChargeLogCoordinator:
 
     @callback
     def _async_schedule_statistics(self) -> None:
-        """Rewrite the statistics shortly; several changes are combined."""
-        if not self.vehicles or not recorder_available(self.hass):
+        """Rewrite the statistics shortly; several changes are combined.
+
+        Only with the vehicles entry loaded: only then the vehicle list is
+        complete (and statistics of deleted vehicles can be removed).
+        """
+        if self._vehicles_entry_id is None or not recorder_available(self.hass):
             return
         self._async_cancel_statistics()
         self._unsub_statistics = async_call_later(
@@ -780,23 +783,38 @@ class EvChargeLogCoordinator:
             self._unsub_statistics = None
 
     async def _async_write_statistics(self, _now: datetime | None = None) -> None:
-        """Write the hourly statistics of all vehicles from scratch."""
+        """Write the hourly statistics of all vehicles from scratch.
+
+        The IDs follow the names, so statistics of deleted or renamed
+        vehicles are removed afterwards.
+        """
         self._unsub_statistics = None
+        if self._vehicles_entry_id is None:
+            return
+        vehicles = list(self.vehicles.values())
+        names: dict[tuple[str, str], str] = {}
+        for vehicle in vehicles:
+            for kind, key in (
+                (KIND_ENERGY, "statistic_energy"),
+                (KIND_COST, "statistic_cost"),
+            ):
+                names[vehicle.id, kind] = await self._async_text(
+                    key, vehicle=vehicle.name
+                )
+        ids = statistic_ids(names)
         tz = dt_util.get_default_time_zone()
         fees = self.log.fees()
-        for vehicle in list(self.vehicles.values()):
-            names = {
-                KIND_ENERGY: await self._async_text(
-                    "statistic_energy", vehicle=vehicle.name
+        for vehicle in vehicles:
+            kinds = (KIND_ENERGY, KIND_COST)
+            async_write_vehicle(
+                self.hass,
+                {kind: ids[vehicle.id, kind] for kind in kinds},
+                {kind: names[vehicle.id, kind] for kind in kinds},
+                hourly_statistics(
+                    self.log.sessions(vehicle_id=vehicle.id), fees, vehicle.id, tz
                 ),
-                KIND_COST: await self._async_text(
-                    "statistic_cost", vehicle=vehicle.name
-                ),
-            }
-            rows = hourly_statistics(
-                self.log.sessions(vehicle_id=vehicle.id), fees, vehicle.id, tz
             )
-            async_write_vehicle(self.hass, vehicle.id, names, rows)
+        await async_remove_unused(self.hass, ids.values())
 
     # --- changes ----------------------------------------------------------
 
