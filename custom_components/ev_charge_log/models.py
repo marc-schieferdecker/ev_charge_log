@@ -5,6 +5,8 @@ This module must not import Home Assistant so it can be tested on its own.
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -885,3 +887,133 @@ def build_session(
         note=data.note,
         source=data.source,
     )
+
+
+# --- CSV export (stage 6) ---------------------------------------------------
+
+# Column keys of the export, in this order; the header texts come from the
+# translations ("panel_export_col_<key>").
+EXPORT_COLUMNS = (
+    "type",
+    "date",
+    "time",
+    "energy",
+    "charge_type",
+    "tariff",
+    "price",
+    "cost",
+    "cost_overridden",
+    "soc_start",
+    "soc_end",
+    "location",
+    "note",
+    "source",
+)
+# Value texts of the export ("panel_export_<key>").
+EXPORT_VALUES = (
+    "type_session",
+    "type_fee",
+    "yes",
+    "no",
+    "source_manual",
+    "source_reminder",
+)
+# Excel runs cells starting with these as formulas.
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_text(value: str | None) -> str:
+    """Free text for a CSV cell; formulas are defused with a leading quote."""
+    if not value:
+        return ""
+    return f"'{value}" if value.startswith(_FORMULA_START) else value
+
+
+def _csv_number(value: float | None, decimal: str) -> str:
+    """A number without thousands separator; None is an empty cell, 0 is "0"."""
+    if value is None:
+        return ""
+    text = f"{value:.6f}".rstrip("0").rstrip(".")
+    return text.replace(".", decimal)
+
+
+def _csv_money(value: float, decimal: str) -> str:
+    return f"{round_money(value):.2f}".replace(".", decimal)
+
+
+def export_csv(
+    sessions: Iterable[Session],
+    fees: Iterable[Fee],
+    tariff_names: Mapping[str, str],
+    start: date | None,
+    end: date | None,
+    to_local: Callable[[datetime], datetime],
+    texts: Mapping[str, str],
+    decimal: str = ".",
+) -> str:
+    """Sessions and booked monthly fees as CSV for Excel, oldest first.
+
+    A session counts on its local day, a fee on the first of its month;
+    `start` and `end` are inclusive, None is open. `texts` holds the header
+    texts (`EXPORT_COLUMNS`) and value texts (`EXPORT_VALUES`). With a decimal
+    comma the separator is ";", else ",". Starts with a BOM so Excel reads
+    UTF-8. Tariffs not in `tariff_names` (deleted) give an empty name.
+    """
+    if start is not None and end is not None and start > end:
+        raise ValidationError("start of the export is after its end", "export_range")
+
+    def inside(day: date) -> bool:
+        return (start is None or day >= start) and (end is None or day <= end)
+
+    def tariff_name(tariff_id: str | None) -> str:
+        return _csv_text(tariff_names.get(tariff_id, "")) if tariff_id else ""
+
+    rows: list[tuple[tuple[date, int, str], list[str]]] = []
+    for fee in fees:
+        day = date.fromisoformat(f"{fee.month}-01")
+        if not inside(day):
+            continue
+        row = dict.fromkeys(EXPORT_COLUMNS, "")
+        row["type"] = texts["type_fee"]
+        row["date"] = day.isoformat()
+        row["tariff"] = tariff_name(fee.tariff_id)
+        row["cost"] = _csv_money(fee.amount, decimal)
+        # A fee counts at 00:00 on the first, before sessions of that day.
+        rows.append(((day, 0, ""), list(row.values())))
+    for session in sessions:
+        local = to_local(session.timestamp)
+        day = local.date()
+        if not inside(day):
+            continue
+        time = local.strftime("%H:%M")
+        rows.append(
+            (
+                (day, 1, local.strftime("%H:%M:%S.%f")),
+                [
+                    texts["type_session"],
+                    day.isoformat(),
+                    time,
+                    _csv_number(session.energy_kwh, decimal),
+                    session.charge_type.upper(),
+                    tariff_name(session.tariff_id),
+                    _csv_number(session.price_per_kwh, decimal),
+                    _csv_money(session.cost, decimal),
+                    texts["yes"] if session.cost_overridden else texts["no"],
+                    _csv_number(session.soc_start, decimal),
+                    _csv_number(session.soc_end, decimal),
+                    _csv_text(session.location),
+                    _csv_text(session.note),
+                    texts[f"source_{session.source}"],
+                ],
+            )
+        )
+    # Stable sort keeps the booking order of sessions at the same time.
+    rows.sort(key=lambda item: item[0])
+
+    buffer = io.StringIO()
+    writer = csv.writer(
+        buffer, delimiter=";" if decimal == "," else ",", lineterminator="\r\n"
+    )
+    writer.writerow([texts[key] for key in EXPORT_COLUMNS])
+    writer.writerows(cells for _, cells in rows)
+    return "﻿" + buffer.getvalue()

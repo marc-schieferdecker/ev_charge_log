@@ -16,17 +16,23 @@ import voluptuous as vol  # resolves to probatio on HA >= 2026.9
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
+from homeassistant.util import slugify
 from homeassistant.util.hass_dict import HassKey
 
 from .const import DOMAIN, PANEL_URL_PATH
 from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
 from .models import (
+    EXPORT_COLUMNS,
+    EXPORT_VALUES,
     Session,
     TariffMonthRow,
+    ValidationError,
+    export_csv,
     month_of,
     month_totals,
     tariff_month_stats,
@@ -40,6 +46,7 @@ STATIC_URL = "/ev_charge_log_static"
 WS_TYPE = f"{DOMAIN}/panel"
 WS_HISTORY_TYPE = f"{DOMAIN}/panel_history"
 WS_TARIFF_STATS_TYPE = f"{DOMAIN}/panel_tariff_stats"
+WS_EXPORT_TYPE = f"{DOMAIN}/panel_export"
 _MONTH = vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
@@ -121,6 +128,11 @@ TEXT_KEYS = (
     "panel_tariff_total",
     "panel_tariff_current_month",
     "panel_tariff_empty",
+    "panel_export",
+    "panel_export_title",
+    "panel_export_from",
+    "panel_export_to",
+    "panel_export_download",
 )
 SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
@@ -150,6 +162,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, websocket_history)
         websocket_api.async_register_command(hass, websocket_tariff_stats)
         websocket_api.async_register_command(hass, websocket_set_soc)
+        websocket_api.async_register_command(hass, websocket_export)
         hass.data[_SETUP_DONE] = True
 
     # The frontend is a soft dependency (after_dependencies): always loaded in
@@ -261,8 +274,98 @@ def websocket_set_soc(
     connection.send_result(msg["id"])
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_EXPORT_TYPE,
+        vol.Required("vehicle_id"): str,
+        vol.Optional("start"): vol.Any(None, cv.date),
+        vol.Optional("end"): vol.Any(None, cv.date),
+        vol.Optional("decimal", default="."): vol.In([",", "."]),
+    }
+)
+@websocket_api.async_response
+async def websocket_export(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Sessions and monthly fees of one vehicle as CSV (stage 6).
+
+    The panel turns the text into a download. Errors carry the translation
+    key as code, the panel shows the translated message.
+    """
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None or msg["vehicle_id"] not in coord.vehicles:
+        connection.send_error(msg["id"], "not_found", "Unknown vehicle")
+        return
+    try:
+        result = await async_export(
+            hass,
+            coord,
+            msg["vehicle_id"],
+            msg.get("start"),
+            msg.get("end"),
+            msg["decimal"],
+        )
+    except ValidationError as err:
+        connection.send_error(msg["id"], err.key, str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+async def async_export(
+    hass: HomeAssistant,
+    coord: EvChargeLogCoordinator,
+    vehicle_id: str,
+    start: date | None,
+    end: date | None,
+    decimal: str,
+) -> dict[str, str]:
+    """File name and CSV text of the export, header in the HA language."""
+    translations = await async_get_translations(
+        hass, hass.config.language, "exceptions", [DOMAIN]
+    )
+    prefix = f"component.{DOMAIN}.exceptions.panel_export"
+    currency = hass.config.currency
+    texts = {
+        key: translations.get(f"{prefix}_col_{key}.message", key).replace(
+            "{currency}", currency
+        )
+        for key in EXPORT_COLUMNS
+    }
+    texts |= {
+        key: translations.get(f"{prefix}_{key}.message", key) for key in EXPORT_VALUES
+    }
+    vehicle = coord.vehicles[vehicle_id]
+    text = export_csv(
+        coord.log.sessions(vehicle_id=vehicle_id),
+        coord.log.fees(vehicle_id=vehicle_id),
+        {tariff_id: tariff.name for tariff_id, tariff in coord.tariffs.items()},
+        start,
+        end,
+        dt_util.as_local,
+        texts,
+        decimal,
+    )
+    parts = ["ev-charge-log", slugify(vehicle.name, separator="-") or "vehicle"]
+    parts += [day.isoformat() for day in (start, end) if day is not None]
+    return {"filename": "_".join(parts) + ".csv", "csv": text}
+
+
 def _local_day(session: Session) -> date:
     return dt_util.as_local(session.timestamp).date()
+
+
+def first_day(coord: EvChargeLogCoordinator, vehicle_id: str) -> date:
+    """Day of the vehicle's oldest session or fee (export preset), else today."""
+    days = [dt_util.now().date()]
+    sessions = coord.log.sessions(vehicle_id=vehicle_id)
+    if sessions:
+        days.append(_local_day(sessions[0]))
+    fees = coord.log.fees(vehicle_id=vehicle_id)
+    if fees:
+        days.append(date.fromisoformat(f"{fees[0].month}-01"))
+    return min(days)
 
 
 def _row_data(row: TariffMonthRow) -> dict[str, Any]:
@@ -435,6 +538,8 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "last": entities(vehicle.id, LAST_ENTITIES),
                     "history": vehicle_history(coord, vehicle.id, current_month),
                     "sessions": sessions(vehicle.id),
+                    # Preset "from" of the export dialog.
+                    "first_day": first_day(coord, vehicle.id).isoformat(),
                     # A detected charge not booked yet: the form preselects
                     # this vehicle (the latest one if several).
                     "pending_ended_at": pending.ended_at.isoformat()

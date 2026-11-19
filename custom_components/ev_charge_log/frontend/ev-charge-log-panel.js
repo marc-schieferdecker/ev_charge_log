@@ -223,6 +223,12 @@ const STYLE = `
     font-size: 16px;
     cursor: pointer;
   }
+  .pager button.export {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    --mdc-icon-size: 18px;
+  }
   .pager button:disabled {
     color: var(--disabled-text-color, var(--secondary-text-color));
     opacity: 0.5;
@@ -851,7 +857,20 @@ class EvChargeLogPanel extends HTMLElement {
             [texts.panel_older, page >= pages - 1, () => go(page + 1)],
             [texts.panel_newer, page === 0, () => go(page - 1)]
           )
-        : null;
+        : document.createElement("div");
+    pager.className = "pager";
+    // Export as CSV, left of "<" ">"; always shown (fees may exist without sessions).
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = "export";
+    exportButton.title = texts.panel_export;
+    exportButton.setAttribute("aria-label", texts.panel_export);
+    const icon = document.createElement("ha-icon");
+    icon.icon = "mdi:download";
+    icon.setAttribute("icon", "mdi:download");
+    exportButton.appendChild(icon);
+    exportButton.addEventListener("click", () => this._openExportDialog(vehicle));
+    pager.prepend(exportButton);
     body.appendChild(this._cardHead(`${vehicle.name} · ${texts.panel_sessions}`, pager));
 
     if (!vehicle.sessions.length) {
@@ -931,6 +950,95 @@ class EvChargeLogPanel extends HTMLElement {
       wrapper.appendChild(small);
     }
     return wrapper;
+  }
+
+  _openExportDialog(vehicle) {
+    const data = this._data;
+    const texts = data.texts;
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "dialog";
+    overlay.appendChild(dialog);
+    const close = () => overlay.remove();
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) close();
+    });
+
+    const heading = document.createElement("h2");
+    heading.textContent = `${texts.panel_export_title} · ${vehicle.name}`;
+    dialog.appendChild(heading);
+
+    // Preset: oldest session or fee until today; empty fields are open.
+    const fromInput = document.createElement("input");
+    fromInput.type = "date";
+    fromInput.value = vehicle.first_day || "";
+    const toInput = document.createElement("input");
+    toInput.type = "date";
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    toInput.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    dialog.append(
+      this._field(texts.panel_export_from, fromInput),
+      this._field(texts.panel_export_to, toInput)
+    );
+
+    const error = document.createElement("div");
+    error.className = "dialog-error";
+    dialog.appendChild(error);
+
+    const buttons = document.createElement("div");
+    buttons.className = "buttons";
+    const spacer = document.createElement("span");
+    spacer.className = "spacer";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = texts.panel_cancel;
+    const downloadButton = document.createElement("button");
+    downloadButton.type = "button";
+    downloadButton.className = "primary";
+    downloadButton.textContent = texts.panel_export_download;
+    buttons.append(spacer, cancelButton, downloadButton);
+    dialog.appendChild(buttons);
+
+    cancelButton.addEventListener("click", close);
+    downloadButton.addEventListener("click", async () => {
+      error.textContent = "";
+      downloadButton.disabled = true;
+      try {
+        const result = await this._hass.callWS({
+          type: "ev_charge_log/panel_export",
+          vehicle_id: vehicle.id,
+          start: fromInput.value || null,
+          end: toInput.value || null,
+          // Excel expects ";" between cells where the decimal mark is ",".
+          decimal: this._number(1.5, 1).includes(",") ? "," : ".",
+        });
+        this._download(result.filename, result.csv);
+        close();
+      } catch (err) {
+        // Websocket errors carry the translation key as code.
+        error.textContent = this._errorText({
+          translation_key: err && err.code,
+          message: err && err.message,
+        });
+      } finally {
+        downloadButton.disabled = false;
+      }
+    });
+
+    this.shadowRoot.appendChild(overlay);
+  }
+
+  _download(filename, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    this.shadowRoot.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   _openDialog(vehicle, session) {

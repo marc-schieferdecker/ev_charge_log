@@ -136,6 +136,11 @@ of a charge type without a reference price count without savings; the
 result may be negative. Sessions without a tariff or of a deleted tariff
 are shown as "No tariff".
 
+The download button in the header of a vehicle's session list exports its
+sessions and monthly fees of a chosen period as a CSV file. It opens directly
+in Excel: with a decimal comma (e.g. German) the cells are separated by `;`,
+otherwise by `,`.
+
 You can also use the entities on your own dashboards. Every vehicle gets
 input entities to book a session:
 

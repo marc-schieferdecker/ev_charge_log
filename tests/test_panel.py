@@ -502,3 +502,80 @@ async def test_panel_marks_vehicle_with_pending_charge(hass: HomeAssistant) -> N
     result = await async_panel_data(hass)
     pending = {v["id"]: v["pending_ended_at"] for v in result["vehicles"]}
     assert pending == {"dolphin": ended.isoformat(), "seal": None}
+
+
+async def test_panel_export_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    from datetime import datetime
+
+    from custom_components.ev_charge_log.models import SessionInput
+
+    hass.config.language = "de"
+    hass.config.currency = "EUR"
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    tz = dt_util.get_default_time_zone()
+    for day in (3, 10):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id="seal",
+                energy_kwh=10.0,
+                charge_type="ac",
+                timestamp=datetime(2026, 11, day, 18, 30, tzinfo=tz),
+                tariff_id="enbw",
+            )
+        )
+
+    result = await async_panel_data(hass)
+    seal = next(v for v in result["vehicles"] if v["id"] == "seal")
+    dolphin = next(v for v in result["vehicles"] if v["id"] == "dolphin")
+    assert seal["first_day"] == "2026-11-03"
+    assert dolphin["first_day"] == dt_util.now().date().isoformat()
+    assert "panel_export_title" in result["texts"]
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_export",
+            "vehicle_id": "seal",
+            "start": "2026-11-05",
+            "end": "2026-11-19",
+            "decimal": ",",
+        }
+    )
+    response = await client.receive_json()
+    assert response["success"], response
+    export = response["result"]
+    assert export["filename"] == "ev-charge-log_seal-u_2026-11-05_2026-11-19.csv"
+    lines = export["csv"].removeprefix("﻿").split("\r\n")
+    assert lines[0].startswith("Typ;Datum;Uhrzeit;Energie (kWh);")
+    assert "Kosten (EUR)" in lines[0]
+    assert lines[1] == "Ladung;2026-11-10;18:30;10;AC;EnBW;0,59;5,90;nein;;;;;manuell"
+    assert lines[2:] == [""]
+
+    # Open range: everything, file name without dates.
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_export", "vehicle_id": "seal"}
+    )
+    export = (await client.receive_json())["result"]
+    assert export["filename"] == "ev-charge-log_seal-u.csv"
+    assert export["csv"].count("\r\n") == 3
+    assert export["csv"].split("\r\n")[0].count(",") == 13
+
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_export",
+            "vehicle_id": "seal",
+            "start": "2026-11-19",
+            "end": "2026-11-01",
+        }
+    )
+    response = await client.receive_json()
+    assert not response["success"]
+    assert response["error"]["code"] == "error_export_range"
+
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_export", "vehicle_id": "nope"}
+    )
+    response = await client.receive_json()
+    assert response["error"]["code"] == "not_found"

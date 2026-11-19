@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -20,6 +23,7 @@ from custom_components.ev_charge_log.models import (
     calculate_cost,
     cost_per_100,
     daily_totals,
+    export_csv,
     month_totals,
     parse_reply,
     round_money,
@@ -854,3 +858,174 @@ def test_reference_prices_from_dict_and_has_fee() -> None:
     assert tariff.versions[0].to_dict()["reference_price_dc"] == 0.85
     assert tariff.has_fee
     assert not HOME.has_fee
+
+
+# --- CSV export -------------------------------------------------------------
+
+BERLIN = ZoneInfo("Europe/Berlin")
+EXPORT_TEXTS = {
+    "type": "Typ",
+    "date": "Datum",
+    "time": "Uhrzeit",
+    "energy": "Energie (kWh)",
+    "charge_type": "Ladeart",
+    "tariff": "Tarif",
+    "price": "Preis (EUR/kWh)",
+    "cost": "Kosten (EUR)",
+    "cost_overridden": "Betrag von Hand",
+    "soc_start": "SoC Beginn (%)",
+    "soc_end": "SoC Ende (%)",
+    "location": "Ort",
+    "note": "Notiz",
+    "source": "Quelle",
+    "type_session": "Ladung",
+    "type_fee": "Grundgebühr",
+    "yes": "ja",
+    "no": "nein",
+    "source_manual": "manuell",
+    "source_reminder": "Erinnerung",
+}
+
+
+def _export_session(session_id: str, ts: datetime, **kwargs) -> Session:
+    defaults = {
+        "vehicle_id": "car",
+        "energy_kwh": 12.4,
+        "charge_type": "ac",
+        "cost": 7.32,
+        "cost_overridden": False,
+        "tariff_id": "enbw",
+        "price_per_kwh": 0.59,
+    }
+    return Session(id=session_id, timestamp=ts, **{**defaults, **kwargs})
+
+
+def _export(sessions=(), fees=(), start=None, end=None, decimal=","):
+    text = export_csv(
+        sessions,
+        fees,
+        {"enbw": "EnBW"},
+        start,
+        end,
+        lambda moment: moment.astimezone(BERLIN),
+        EXPORT_TEXTS,
+        decimal,
+    )
+    assert text.startswith("﻿")
+    return text[1:].split("\r\n")[:-1]
+
+
+def test_export_decimal_comma_uses_semicolon() -> None:
+    lines = _export([_export_session("a", datetime(2026, 11, 3, 9, 5, tzinfo=UTC))])
+    assert lines[0].split(";")[:3] == ["Typ", "Datum", "Uhrzeit"]
+    assert lines[1] == (
+        "Ladung;2026-11-03;10:05;12,4;AC;EnBW;0,59;7,32;nein;;;;;manuell"
+    )
+
+
+def test_export_decimal_point_uses_comma() -> None:
+    lines = _export(
+        [_export_session("a", datetime(2026, 11, 3, 9, 5, tzinfo=UTC))], decimal="."
+    )
+    assert lines[1] == "Ladung,2026-11-03,10:05,12.4,AC,EnBW,0.59,7.32,nein,,,,,manuell"
+
+
+def test_export_zero_is_not_empty() -> None:
+    session = _export_session(
+        "a",
+        datetime(2026, 11, 3, 9, 0, tzinfo=UTC),
+        cost=0.0,
+        price_per_kwh=0.0,
+        cost_overridden=True,
+        soc_start=0.0,
+        soc_end=None,
+        source="reminder",
+    )
+    cells = _export([session])[1].split(";")
+    assert cells[6:11] == ["0", "0,00", "ja", "0", ""]
+    assert cells[13] == "Erinnerung"
+
+
+def test_export_range_uses_local_day_inclusive() -> None:
+    # 23:30 UTC on Nov 30 is Dec 1 in Berlin.
+    late = _export_session("late", datetime(2026, 11, 30, 23, 30, tzinfo=UTC))
+    early = _export_session("early", datetime(2026, 11, 1, 0, 0, tzinfo=UTC))
+    lines = _export([early, late], start=date(2026, 11, 1), end=date(2026, 11, 30))
+    assert [line.split(";")[1] for line in lines[1:]] == ["2026-11-01"]
+    lines = _export([early, late], start=date(2026, 12, 1), end=date(2026, 12, 1))
+    assert [line.split(";")[1:3] for line in lines[1:]] == [["2026-12-01", "00:30"]]
+
+
+def test_export_open_range_is_everything() -> None:
+    sessions = [
+        _export_session("a", datetime(2025, 1, 3, 9, 0, tzinfo=UTC)),
+        _export_session("b", datetime(2026, 11, 3, 9, 0, tzinfo=UTC)),
+    ]
+    assert len(_export(sessions)) == 3
+    assert len(_export(sessions, start=date(2026, 1, 1))) == 2
+    assert len(_export(sessions, end=date(2025, 12, 31))) == 2
+
+
+def test_export_start_after_end_is_rejected() -> None:
+    with pytest.raises(ValidationError) as err:
+        _export(start=date(2026, 11, 2), end=date(2026, 11, 1))
+    assert err.value.key == "error_export_range"
+
+
+def test_export_fees_on_the_first_before_sessions() -> None:
+    sessions = [_export_session("a", datetime(2026, 11, 1, 6, 0, tzinfo=UTC))]
+    fees = [
+        Fee("enbw", "car", "2026-11", 11.99),
+        Fee("gone", "car", "2026-10", 5.0),
+        Fee("enbw", "car", "2026-12", 11.99),
+    ]
+    lines = _export(sessions, fees, start=date(2026, 10, 1), end=date(2026, 11, 30))
+    assert [line.split(";")[:3] for line in lines[1:]] == [
+        ["Grundgebühr", "2026-10-01", ""],
+        ["Grundgebühr", "2026-11-01", ""],
+        ["Ladung", "2026-11-01", "07:00"],
+    ]
+    # Deleted tariff: empty name; the amount is in the cost column.
+    assert lines[1].split(";")[5:8] == ["", "", "5,00"]
+    assert lines[2].split(";")[5:8] == ["EnBW", "", "11,99"]
+    # A fee in the range but not the first of its month is outside.
+    assert len(_export(fees=fees, start=date(2026, 11, 2))) == 2
+
+
+def test_export_deleted_tariff_and_no_tariff_are_empty() -> None:
+    sessions = [
+        _export_session("a", datetime(2026, 11, 3, 9, 0, tzinfo=UTC), tariff_id="gone"),
+        _export_session(
+            "b",
+            datetime(2026, 11, 4, 9, 0, tzinfo=UTC),
+            tariff_id=None,
+            price_per_kwh=None,
+            cost_overridden=True,
+        ),
+    ]
+    lines = _export(sessions)
+    assert lines[1].split(";")[5] == ""
+    assert lines[2].split(";")[5:7] == ["", ""]
+
+
+def test_export_quotes_text_and_defuses_formulas() -> None:
+    session = _export_session(
+        "a",
+        datetime(2026, 11, 3, 9, 0, tzinfo=UTC),
+        note='Säule "3"; defekt\nzweite Zeile',
+        location="=HYPERLINK(1)",
+    )
+    text = export_csv(
+        [session],
+        [],
+        {"enbw": "-EnBW"},
+        None,
+        None,
+        lambda moment: moment.astimezone(BERLIN),
+        EXPORT_TEXTS,
+        ",",
+    )
+    rows = list(csv.reader(io.StringIO(text[1:]), delimiter=";"))
+    assert rows[1][5] == "'-EnBW"
+    assert rows[1][11] == "'=HYPERLINK(1)"
+    assert rows[1][12] == 'Säule "3"; defekt\nzweite Zeile'
