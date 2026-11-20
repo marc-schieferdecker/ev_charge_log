@@ -11,5 +11,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/marc-schieferdecker/ev_charge_log/issues",
   "requirements": [],
-  "version": "0.1.22"
+  "version": "0.1.24"
 }

@@ -25,6 +25,7 @@ from custom_components.ev_charge_log.models import (
     cost_per_100,
     daily_totals,
     energy_from_soc,
+    energy_per_100,
     export_csv,
     month_totals,
     parse_reply,
@@ -749,6 +750,36 @@ def test_cost_per_100_free_charging_is_zero() -> None:
         FREE,
     )
     assert cost_per_100([free], BASELINE, 12200.0) == 0.0
+
+
+def test_energy_per_100_counts_sessions_since_baseline() -> None:
+    sessions = [
+        _session_at("old", datetime(2026, 10, 31, tzinfo=UTC), 40.0),
+        _session_at("a", datetime(2026, 11, 2, tzinfo=UTC), 40.0),
+        _session_at("b", datetime(2026, 11, 9, tzinfo=UTC), 20.0),
+    ]
+    # 60 kWh over 400 km -> 15 kWh per 100 km
+    assert energy_per_100(sessions, BASELINE, 12400.0) == 15.0
+
+
+def test_energy_per_100_counts_free_charging() -> None:
+    free = build_session(
+        "f",
+        _input(
+            energy_kwh=30.0,
+            tariff_id="free",
+            timestamp=datetime(2026, 11, 2, tzinfo=UTC),
+        ),
+        FREE,
+    )
+    # Free sessions count with their energy: 30 kWh over 200 km
+    assert energy_per_100([free], BASELINE, 12200.0) == 15.0
+
+
+def test_energy_per_100_needs_some_distance() -> None:
+    sessions = [_session_at("a", datetime(2026, 11, 2, tzinfo=UTC), 40.0)]
+    assert energy_per_100(sessions, BASELINE, 12000.5) is None
+    assert energy_per_100([], BASELINE, 12100.0) == 0.0
 
 
 def test_odometer_baseline_roundtrip() -> None:

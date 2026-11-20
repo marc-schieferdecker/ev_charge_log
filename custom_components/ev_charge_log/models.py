@@ -661,6 +661,24 @@ def cost_per_100(
     return round(float(cost) / distance * 100, 2)
 
 
+def energy_per_100(
+    sessions: Iterable[Session], baseline: OdometerBaseline, odometer: float
+) -> float | None:
+    """Charged energy (kWh) per 100 distance units since the baseline.
+
+    Same basis as `cost_per_100`: sessions at or after `baseline.since`,
+    None until at least MIN_DISTANCE was driven.
+    """
+    distance = odometer - baseline.start
+    if distance < MIN_DISTANCE:
+        return None
+    energy = sum(
+        (Decimal(str(s.energy_kwh)) for s in sessions if s.timestamp >= baseline.since),
+        Decimal(0),
+    )
+    return round(float(energy) / distance * 100, 2)
+
+
 @dataclass(frozen=True, slots=True)
 class HourlyTotal:
     """Running totals of a vehicle at the end of an hour (stage 5).

@@ -140,6 +140,14 @@ VEHICLE_SENSORS: tuple[EvChargeLogSensorDescription, ...] = (
         tracks_odometer=True,
     ),
     EvChargeLogSensorDescription(
+        key="energy_per_100",
+        translation_key="energy_per_100",
+        native_unit_of_measurement="kWh/100 {length}",
+        suggested_display_precision=1,
+        value_fn=lambda c, v: c.energy_per_100(v),
+        tracks_odometer=True,
+    ),
+    EvChargeLogSensorDescription(
         key="session_count",
         translation_key="session_count",
         state_class=SensorStateClass.TOTAL,

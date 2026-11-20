@@ -582,3 +582,34 @@ async def test_panel_export_websocket(hass: HomeAssistant, hass_ws_client) -> No
     )
     response = await client.receive_json()
     assert response["error"]["code"] == "not_found"
+
+
+async def test_panel_shows_odometer_below_total_energy(hass: HomeAssistant) -> None:
+    hass.config.language = "de"
+    hass.states.async_set(
+        "sensor.seal_odometer", "12345", {"unit_of_measurement": "km"}
+    )
+    await setup_entries(
+        hass,
+        [
+            _sub("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
+            _sub(
+                "vehicle",
+                "seal",
+                "Seal U",
+                default_tariff_id="enbw",
+                odometer_entity_id="sensor.seal_odometer",
+            ),
+            _sub("vehicle", "dolphin", "Dolphin"),
+        ],
+    )
+    result = await async_panel_data(hass)
+    seal, dolphin = (
+        next(v for v in result["vehicles"] if v["id"] == key)
+        for key in ("seal", "dolphin")
+    )
+    names = [row["name"] for row in seal["stats"]]
+    assert names[1:3] == ["Gesamtenergie", "Kilometerstand"]
+    assert seal["stats"][2]["entity"] == "sensor.seal_odometer"
+    # Without an odometer sensor: no row.
+    assert "Kilometerstand" not in [row["name"] for row in dolphin["stats"]]

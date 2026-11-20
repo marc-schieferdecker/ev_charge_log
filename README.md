@@ -168,7 +168,10 @@ same works for the `add_session` action (without `energy_kwh`).
 Per vehicle: total cost (including monthly fees), monthly fees, total
 energy, average price per kWh (total cost / total energy, including free
 sessions), number of sessions, cost per 100 km (with an odometer sensor;
-charging cost since the first odometer reading, without monthly fees), and
+charging cost since the first odometer reading, without monthly fees),
+consumption per 100 km (with an odometer sensor; charged energy since the
+first odometer reading, also shown in brackets behind the total energy on
+the Charging log page), and
 cost, energy, time and tariff of the last session. If you enter SoC values, the charged SoC
 points, the calculated charging loss and the cost per SoC point of the last
 session are shown as well. For a session whose energy was calculated from the

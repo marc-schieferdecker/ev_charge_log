@@ -69,6 +69,7 @@ from .models import (
     ValidationError,
     Vehicle,
     cost_per_100,
+    energy_per_100,
     hourly_statistics,
     parse_reply,
 )
@@ -319,6 +320,19 @@ class EvChargeLogCoordinator:
         if reading is None:
             return None
         return cost_per_100(self.log.sessions(vehicle_id=vehicle_id), baseline, reading)
+
+    def energy_per_100(self, vehicle_id: str) -> float | None:
+        """Charged energy per 100 km (or mi) since the odometer baseline."""
+        baseline = self.odometer.get(vehicle_id)
+        vehicle = self.vehicles.get(vehicle_id)
+        if baseline is None or vehicle is None:
+            return None
+        reading = self.odometer_reading(vehicle)
+        if reading is None:
+            return None
+        return energy_per_100(
+            self.log.sessions(vehicle_id=vehicle_id), baseline, reading
+        )
 
     # --- monthly fees (stage 4) ----------------------------------------------
 

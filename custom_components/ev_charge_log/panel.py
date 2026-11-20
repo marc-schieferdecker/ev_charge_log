@@ -521,6 +521,32 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
             )
         return rows
 
+    def stats(vehicle_id: str) -> list[dict[str, Any]]:
+        """Statistic rows.
+
+        With an odometer sensor: the consumption per 100 km in brackets behind
+        the total energy (`extra`), and the odometer below it.
+        """
+        rows = entities(vehicle_id, STAT_ENTITIES)
+        odometer = coord.vehicles[vehicle_id].odometer_entity_id
+        if odometer:
+            energy = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{vehicle_id}_total_energy"
+            )
+            consumption = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{vehicle_id}_energy_per_100"
+            )
+            position = len(rows)
+            for i, row in enumerate(rows):
+                if row["entity"] == energy:
+                    position = i + 1
+                    if consumption:
+                        row["extra"] = consumption
+            rows.insert(
+                position, {"entity": odometer, "name": label("sensor", "odometer")}
+            )
+        return rows
+
     vehicles = []
     tariffs = []
     if coord is not None:
@@ -534,7 +560,7 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     "device_id": device_of("button", f"{vehicle.id}_book"),
                     "input": entities(vehicle.id, INPUT_ENTITIES),
                     "book": next(iter(entities(vehicle.id, (BOOK_ENTITY,))), None),
-                    "stats": entities(vehicle.id, STAT_ENTITIES),
+                    "stats": stats(vehicle.id),
                     "last": entities(vehicle.id, LAST_ENTITIES),
                     "history": vehicle_history(coord, vehicle.id, current_month),
                     "sessions": sessions(vehicle.id),

@@ -214,3 +214,44 @@ async def test_set_odometer_start_without_sensor_is_rejected(
             blocking=True,
         )
     assert err.value.translation_key == "error_no_odometer"
+
+
+def _consumption(hass: HomeAssistant, vehicle: str) -> str:
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{vehicle}_energy_per_100"
+    )
+    assert entity_id
+    return entity_id
+
+
+async def test_energy_per_100_km(hass: HomeAssistant) -> None:
+    vehicles = await _setup(hass)
+    coord = vehicles.runtime_data
+    state = hass.states.get(_consumption(hass, "seal"))
+    assert state.state == "unknown"  # nothing driven yet
+    assert state.attributes["unit_of_measurement"] == "kWh/100 km"
+    assert state.attributes["friendly_name"] == "Seal U Consumption per 100 km"
+
+    await _book(coord, 40.0, dt_util.now() - timedelta(days=3))  # before baseline
+    await _book(coord, 60.0)
+    hass.states.async_set(ODOMETER, "12400", {"unit_of_measurement": "km"})
+    await hass.async_block_till_done()
+    assert hass.states.get(_consumption(hass, "seal")).state == "15.0"
+    assert hass.states.get(_consumption(hass, "dolphin")).state == "unknown"
+
+
+async def test_panel_shows_consumption_behind_total_energy(
+    hass: HomeAssistant,
+) -> None:
+    await _setup(hass)
+    result = await async_panel_data(hass)
+    seal, dolphin = (
+        next(v for v in result["vehicles"] if v["id"] == key)
+        for key in ("seal", "dolphin")
+    )
+    energy = next(r for r in seal["stats"] if r["entity"].endswith("total_energy"))
+    assert energy["extra"] == _consumption(hass, "seal")
+    # The sensor itself is no own row.
+    assert _consumption(hass, "seal") not in [r["entity"] for r in seal["stats"]]
+    # Without an odometer sensor: nothing in brackets.
+    assert not any("extra" in r for r in dolphin["stats"])

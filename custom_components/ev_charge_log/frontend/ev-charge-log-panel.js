@@ -476,6 +476,7 @@ const DOMAIN = "ev_charge_log";
 const MODULE_VERSION = new URL(import.meta.url).searchParams.get("v");
 const PAGE_SIZE = 5;
 const SOC_ROW = "ev-charge-log-soc-row";
+const EXTRA_ROW = "ev-charge-log-extra-row";
 // Vehicle chosen last in the booking form (per browser).
 const VEHICLE_KEY = "ev_charge_log_vehicle";
 
@@ -673,6 +674,15 @@ class EvChargeLogPanel extends HTMLElement {
           name: r.name,
           start_label: data.texts.panel_soc_start,
           end_label: data.texts.panel_soc_end,
+        };
+      }
+      if (r.extra) {
+        // Total energy with the consumption per 100 km in brackets.
+        return {
+          type: `custom:${EXTRA_ROW}`,
+          entity: r.entity,
+          name: r.name,
+          extra: r.extra,
         };
       }
       return r.name ? { entity: r.entity, name: r.name } : r.entity;
@@ -1904,6 +1914,68 @@ class EvChargeLogSocRow extends HTMLElement {
 
 if (!customElements.get(SOC_ROW)) {
   customElements.define(SOC_ROW, EvChargeLogSocRow);
+}
+
+// Entity row like Home Assistant's sensor row (hui-sensor-entity-row: a
+// hui-generic-entity-row with the formatted state in its slot), plus the
+// value of a second entity in brackets behind the state. Name, icon and
+// more-info on tap come from hui-generic-entity-row.
+class EvChargeLogExtraRow extends HTMLElement {
+  setConfig(config) {
+    if (!config || !config.entity || !config.extra) {
+      throw new Error("entity and extra are required");
+    }
+    this._config = config;
+    this._row = null;
+    this.innerHTML = "";
+    this._update();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+
+  async _update() {
+    if (!this._config || !this._hass) return;
+    if (!this._row) {
+      if (this._building) return;
+      this._building = true;
+      await customElements.whenDefined("hui-generic-entity-row");
+      this._building = false;
+      if (this._row) return;
+      this._row = document.createElement("hui-generic-entity-row");
+      this._row.config = { entity: this._config.entity, name: this._config.name };
+      this._value = document.createElement("span");
+      this._row.appendChild(this._value);
+      this.appendChild(this._row);
+    }
+    const hass = this._hass;
+    this._row.hass = hass;
+    const main = hass.states[this._config.entity];
+    const extra = hass.states[this._config.extra];
+    let text = main ? hass.formatEntityState(main) : "";
+    if (extra && !["unknown", "unavailable"].includes(extra.state)) {
+      text += ` (${this._shortExtra(hass, main, extra)})`;
+    }
+    if (this._value.textContent !== text) this._value.textContent = text;
+  }
+
+  // "21,2 kWh/100 km" behind "620 kWh" becomes "21,2/100 km": the unit of
+  // the main value is not repeated. Other units stay as formatted by HA.
+  _shortExtra(hass, main, extra) {
+    const formatted = hass.formatEntityState(extra);
+    const unit = extra.attributes.unit_of_measurement;
+    const mainUnit = main && main.attributes.unit_of_measurement;
+    if (!unit || !mainUnit || !unit.startsWith(mainUnit) || !formatted.endsWith(unit)) {
+      return formatted;
+    }
+    const value = formatted.slice(0, -unit.length).trimEnd();
+    return `${value}${unit.slice(mainUnit.length)}`;
+  }
+}
+if (!customElements.get(EXTRA_ROW)) {
+  customElements.define(EXTRA_ROW, EvChargeLogExtraRow);
 }
 if (!customElements.get("ev-charge-log-panel")) {
   customElements.define("ev-charge-log-panel", EvChargeLogPanel);
