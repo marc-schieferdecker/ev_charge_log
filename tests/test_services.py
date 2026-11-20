@@ -33,7 +33,14 @@ async def entry(hass: HomeAssistant) -> MockConfigEntry:
             _sub("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
             _sub("tariff", "free", "Arbeitgeber", price_ac=0.0, price_dc=None),
             _sub("tariff", "ewe", "EWE Go", price_ac=None, price_dc=0.62),
-            _sub("vehicle", "seal", "Seal U", default_tariff_id="enbw"),
+            _sub(
+                "vehicle",
+                "seal",
+                "Seal U",
+                default_tariff_id="enbw",
+                battery_capacity_kwh=75.0,
+                charging_loss_dc=1.0,
+            ),
             _sub("vehicle", "dolphin", "Dolphin", default_tariff_id="free"),
         ],
     )
@@ -391,7 +398,7 @@ async def test_book_from_dashboard_with_cost_and_other_tariff(
 async def test_book_without_energy_is_rejected(hass: HomeAssistant, entry) -> None:
     with pytest.raises(ServiceValidationError) as err:
         await _press(hass, _entity(hass, "button", "seal", "book"))
-    assert err.value.translation_key == "energy_required"
+    assert err.value.translation_key == "error_energy_required"
     assert entry.runtime_data.log.sessions() == []
 
 
@@ -498,7 +505,14 @@ async def test_legacy_time_input_is_removed(hass: HomeAssistant) -> None:
         hass,
         [
             _sub("tariff", "enbw", "EnBW", price_ac=0.59, price_dc=0.69),
-            _sub("vehicle", "seal", "Seal U", default_tariff_id="enbw"),
+            _sub(
+                "vehicle",
+                "seal",
+                "Seal U",
+                default_tariff_id="enbw",
+                battery_capacity_kwh=75.0,
+                charging_loss_dc=1.0,
+            ),
         ],
     )
     assert registry.async_get(legacy.entity_id) is None
@@ -575,3 +589,171 @@ async def test_price_version_uses_local_day(hass: HomeAssistant, entry) -> None:
     )
     assert result["session"]["price_per_kwh"] == 0.62
     assert result["session"]["timestamp"] == "2027-01-01T00:30:00+01:00"
+
+
+# --- energy from SoC ----------------------------------------------------------
+
+
+async def test_add_session_without_energy_uses_soc(hass: HomeAssistant, entry) -> None:
+    result = await _call(
+        hass,
+        "add_session",
+        vehicle=_device(hass, "seal"),
+        tariff=_device(hass, "enbw"),
+        soc_start=20,
+        soc_end=80,
+        timestamp=T0,
+    )
+    session = result["session"]
+    assert session["energy_kwh"] == 45.0  # 60 % of 75 kWh
+    assert session["cost"] == 26.55  # 45 kWh x 0.59
+    assert session["cost_overridden"] is False
+    state = hass.states.get(_entity(hass, "sensor", "seal", "total_energy"))
+    assert float(state.state) == 45.0
+
+
+async def test_entered_energy_wins_over_soc(hass: HomeAssistant, entry) -> None:
+    session = await _book(hass, "seal", "enbw", soc_start=20, soc_end=80)
+    assert session["energy_kwh"] == 40.0
+
+
+async def test_energy_from_soc_with_manual_cost(hass: HomeAssistant, entry) -> None:
+    result = await _call(
+        hass,
+        "add_session",
+        vehicle=_device(hass, "seal"),
+        soc_start=50,
+        soc_end=70,
+        cost=0,
+    )
+    assert result["session"]["energy_kwh"] == 15.0
+    assert result["session"]["cost"] == 0.0
+    assert result["session"]["cost_overridden"] is True
+
+
+@pytest.mark.parametrize(
+    ("vehicle", "soc", "key"),
+    [
+        ("seal", {}, "error_energy_required"),
+        ("seal", {"soc_end": 80}, "error_energy_required"),
+        ("seal", {"soc_start": 80, "soc_end": 40}, "error_energy_soc_order"),
+        ("dolphin", {"soc_start": 20, "soc_end": 80}, "error_energy_soc_capacity"),
+    ],
+)
+async def test_add_session_without_energy_is_rejected(
+    hass: HomeAssistant, entry, vehicle: str, soc: dict[str, float], key: str
+) -> None:
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(hass, "add_session", vehicle=_device(hass, vehicle), cost=5, **soc)
+    assert err.value.translation_key == key
+    assert entry.runtime_data.log.sessions() == []
+
+
+async def test_update_energy_from_soc(hass: HomeAssistant, entry) -> None:
+    await _book(hass, "seal", "enbw", soc_start=20, soc_end=80)
+    result = await _call(
+        hass, "update_session", vehicle=_device(hass, "seal"), energy_from_soc=True
+    )
+    assert result["session"]["energy_kwh"] == 45.0
+    assert result["session"]["cost"] == 26.55
+
+
+async def test_update_energy_from_changed_soc(hass: HomeAssistant, entry) -> None:
+    await _book(hass, "seal", "enbw", soc_start=20, soc_end=80)
+    result = await _call(
+        hass,
+        "update_session",
+        vehicle=_device(hass, "seal"),
+        energy_from_soc=True,
+        soc_end=60,
+    )
+    assert result["session"]["energy_kwh"] == 30.0  # 40 % of 75 kWh
+    assert result["session"]["soc_end"] == 60.0
+    assert result["session"]["cost"] == 17.70
+
+
+async def test_update_energy_from_soc_keeps_manual_cost(
+    hass: HomeAssistant, entry
+) -> None:
+    await _book(hass, "seal", "enbw", soc_start=20, soc_end=80, cost=9.99)
+    result = await _call(
+        hass, "update_session", vehicle=_device(hass, "seal"), energy_from_soc=True
+    )
+    assert result["session"]["energy_kwh"] == 45.0
+    assert result["session"]["cost"] == 9.99
+
+
+async def test_update_energy_from_cleared_soc_is_rejected(
+    hass: HomeAssistant, entry
+) -> None:
+    await _book(hass, "seal", "enbw", soc_start=20, soc_end=80)
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(
+            hass,
+            "update_session",
+            vehicle=_device(hass, "seal"),
+            energy_from_soc=True,
+            clear_soc_start=True,
+        )
+    assert err.value.translation_key == "error_energy_required"
+    assert entry.runtime_data.log.last_session("seal").energy_kwh == 40.0
+
+
+async def test_update_energy_and_energy_from_soc_conflict(
+    hass: HomeAssistant, entry
+) -> None:
+    await _book(hass, "seal", "enbw", soc_start=20, soc_end=80)
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(
+            hass,
+            "update_session",
+            vehicle=_device(hass, "seal"),
+            energy_kwh=10,
+            energy_from_soc=True,
+        )
+    assert err.value.translation_key == "energy_conflict"
+
+
+async def test_book_from_dashboard_with_soc_only(hass: HomeAssistant, entry) -> None:
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_soc_start"), value=10
+    )
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_soc_end"), value=50
+    )
+    await _press(hass, _entity(hass, "button", "seal", "book"))
+    session = entry.runtime_data.log.last_session("seal")
+    assert session.energy_kwh == 30.0  # 40 % of 75 kWh
+    assert session.cost == 17.70
+
+
+async def test_energy_from_soc_adds_charging_loss_of_charge_type(
+    hass: HomeAssistant, entry
+) -> None:
+    result = await _call(
+        hass,
+        "add_session",
+        vehicle=_device(hass, "seal"),
+        tariff=_device(hass, "enbw"),
+        charge_type="dc",
+        soc_start=20,
+        soc_end=80,
+    )
+    assert result["session"]["energy_kwh"] == 45.45  # 45 kWh + 1 % DC loss
+    assert result["session"]["cost"] == 31.36  # 45.45 kWh x 0.69
+
+
+async def test_update_energy_from_soc_uses_loss_of_new_charge_type(
+    hass: HomeAssistant, entry
+) -> None:
+    await _book(hass, "seal", "enbw", soc_start=20, soc_end=80)  # AC, no loss
+    result = await _call(
+        hass,
+        "update_session",
+        vehicle=_device(hass, "seal"),
+        charge_type="dc",
+        energy_from_soc=True,
+    )
+    assert result["session"]["energy_kwh"] == 45.45
+    assert result["session"]["price_per_kwh"] == 0.69
+    assert result["session"]["cost"] == 31.36

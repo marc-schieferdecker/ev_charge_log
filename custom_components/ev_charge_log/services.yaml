@@ -8,7 +8,6 @@ add_session:
             - integration: ev_charge_log
               model_id: vehicle
     energy_kwh:
-      required: true
       selector:
         number:
           min: 0.01
@@ -73,6 +72,9 @@ update_session:
           step: 0.01
           unit_of_measurement: kWh
           mode: box
+    energy_from_soc:
+      selector:
+        boolean:
     charge_type:
       selector:
         select:

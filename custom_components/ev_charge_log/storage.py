@@ -172,7 +172,7 @@ class SessionLog:
           day applies. If the tariff no longer exists, the stored price stays.
         - A manual cost stays until it is changed or cleared (cost=None).
         """
-        old = self._resolve(vehicle_id, session_id)
+        old = self.resolve(vehicle_id, session_id)
 
         changes: dict[str, Any] = {
             name: value
@@ -218,7 +218,7 @@ class SessionLog:
 
     def delete(self, vehicle_id: str, session_id: str | None = None) -> Session:
         """Delete a session. Without ID the vehicle's last session."""
-        session = self._resolve(vehicle_id, session_id)
+        session = self.resolve(vehicle_id, session_id)
         del self._sessions[session.id]
         return session
 
@@ -235,7 +235,8 @@ class SessionLog:
         self._fees = [f for f in self._fees if f.vehicle_id in keep]
         return len(orphans) + fee_count - len(self._fees)
 
-    def _resolve(self, vehicle_id: str, session_id: str | None) -> Session:
+    def resolve(self, vehicle_id: str, session_id: str | None = None) -> Session:
+        """The session with this ID of the vehicle, without ID the last one."""
         if session_id is None:
             session = self.last_session(vehicle_id)
             if session is None:

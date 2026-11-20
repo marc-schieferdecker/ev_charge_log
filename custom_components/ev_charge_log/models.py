@@ -82,7 +82,12 @@ def _optional_float(value: Any) -> float | None:
 
 @dataclass(frozen=True, slots=True)
 class Vehicle:
-    """A vehicle. SoC and capacity are display values only."""
+    """A vehicle.
+
+    SoC and capacity are display values, with one exception: without entered
+    energy, hand-entered SoC values and the capacity give the energy
+    (`energy_from_soc`).
+    """
 
     id: str
     name: str
@@ -96,11 +101,28 @@ class Vehicle:
     notify_services: tuple[str, ...] = ()
     # Odometer sensor for the cost per 100 km (display value)
     odometer_entity_id: str | None = None
+    # Charging loss in % per charge type, added to the energy from SoC
+    charging_loss_ac: float | None = None
+    charging_loss_dc: float | None = None
 
     def __post_init__(self) -> None:
         """Validate the vehicle."""
         if self.battery_capacity_kwh is not None and self.battery_capacity_kwh <= 0:
             raise ValidationError("battery_capacity_kwh must be positive", "capacity")
+        for loss in (self.charging_loss_ac, self.charging_loss_dc):
+            if loss is not None and not 0 <= loss < 100:
+                raise ValidationError(
+                    "charging loss must be between 0 and 100 %", "charging_loss"
+                )
+
+    def charging_loss(self, charge_type: str) -> float:
+        """Charging loss in % for the charge type; 0 if not configured."""
+        loss = (
+            self.charging_loss_dc
+            if charge_type == CHARGE_TYPE_DC
+            else self.charging_loss_ac
+        )
+        return loss or 0.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Vehicle:
@@ -116,6 +138,8 @@ class Vehicle:
             reminder_excluded_zones=tuple(data.get("reminder_excluded_zones") or ()),
             notify_services=tuple(data.get("notify_services") or ()),
             odometer_entity_id=data.get("odometer_entity_id"),
+            charging_loss_ac=_optional_float(data.get("charging_loss_ac")),
+            charging_loss_dc=_optional_float(data.get("charging_loss_dc")),
         )
 
 
@@ -821,7 +845,7 @@ def tariff_month_stats(
 
 @dataclass(frozen=True, slots=True)
 class SocMetrics:
-    """Display-only values derived from SoC. Never used for cost or energy."""
+    """Display-only values derived from SoC."""
 
     soc_points: float
     charging_loss_percent: float | None
@@ -843,12 +867,52 @@ def soc_metrics(
     return SocMetrics(points, loss, cost_per_point)
 
 
+def energy_from_soc(
+    soc_start: float | None,
+    soc_end: float | None,
+    battery_capacity_kwh: float | None,
+    charging_loss_percent: float = 0.0,
+) -> float:
+    """Charged energy: (end - start) / 100 x capacity x (1 + loss / 100).
+
+    Used only when no energy was entered. The charging loss (of the vehicle
+    for the charge type, 0 if not configured) is added to the energy that
+    reached the battery. Rounded once, to 0.01 kWh.
+    """
+    if soc_start is None or soc_end is None:
+        raise ValidationError(
+            "energy_kwh or soc_start and soc_end are required", "energy_required"
+        )
+    if not battery_capacity_kwh or battery_capacity_kwh <= 0:
+        raise ValidationError(
+            "the vehicle has no battery capacity", "energy_soc_capacity"
+        )
+    for name, value in (("soc_start", soc_start), ("soc_end", soc_end)):
+        if not 0 <= value <= 100:
+            raise ValidationError(f"{name} must be between 0 and 100", f"{name}_range")
+    energy = (
+        (Decimal(str(soc_end)) - Decimal(str(soc_start)))
+        / Decimal(100)
+        * Decimal(str(battery_capacity_kwh))
+        * (1 + Decimal(str(charging_loss_percent)) / Decimal(100))
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if energy <= 0:
+        raise ValidationError(
+            "soc_end must be greater than soc_start", "energy_soc_order"
+        )
+    return float(energy)
+
+
 @dataclass(slots=True)
 class SessionInput:
-    """Raw input for booking a session, before cost calculation."""
+    """Raw input for booking a session, before cost calculation.
+
+    `energy_kwh` None: the coordinator calculates it from the entered SoC
+    (`energy_from_soc`) before booking.
+    """
 
     vehicle_id: str
-    energy_kwh: float
+    energy_kwh: float | None
     charge_type: str
     timestamp: datetime
     tariff_id: str | None = None
@@ -868,6 +932,8 @@ def build_session(
         raise ValidationError(
             f"unknown tariff: {data.tariff_id}", "unknown_tariff", tariff=data.tariff_id
         )
+    if data.energy_kwh is None:
+        raise ValidationError("energy_kwh is required", "energy_required")
     result = calculate_cost(
         data.energy_kwh, data.charge_type, tariff, data.cost, data.timestamp.date()
     )

@@ -27,6 +27,8 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_BATTERY_CAPACITY_KWH,
     CONF_CHARGING_ENTITY_ID,
+    CONF_CHARGING_LOSS_AC,
+    CONF_CHARGING_LOSS_DC,
     CONF_DEFAULT_TARIFF_ID,
     CONF_FEE_END,
     CONF_FEE_START,
@@ -66,6 +68,15 @@ _CAPACITY_SELECTOR = selector.NumberSelector(
         step="any",
         mode=selector.NumberSelectorMode.BOX,
         unit_of_measurement="kWh",
+    )
+)
+_LOSS_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=0,
+        max=50,
+        step="any",
+        mode=selector.NumberSelectorMode.BOX,
+        unit_of_measurement="%",
     )
 )
 _NAME_SELECTOR = selector.TextSelector()
@@ -234,6 +245,8 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
         fields: dict[Any, Any] = {
             vol.Required(CONF_NAME): _NAME_SELECTOR,
             vol.Optional(CONF_BATTERY_CAPACITY_KWH): _CAPACITY_SELECTOR,
+            vol.Optional(CONF_CHARGING_LOSS_AC): _LOSS_SELECTOR,
+            vol.Optional(CONF_CHARGING_LOSS_DC): _LOSS_SELECTOR,
             vol.Optional(CONF_CHARGING_ENTITY_ID): _CHARGING_SELECTOR,
             vol.Optional(CONF_SOC_ENTITY_ID): _SOC_SELECTOR,
             vol.Optional(CONF_LOCATION_ENTITY_ID): _LOCATION_SELECTOR,
@@ -277,11 +290,14 @@ class VehicleSubentryFlow(_NamedSubentryFlow):
 
     @staticmethod
     def _to_data(user_input: dict[str, Any]) -> dict[str, Any]:
-        capacity = user_input.get(CONF_BATTERY_CAPACITY_KWH)
+        def number(key: str) -> float | None:
+            value = user_input.get(key)
+            return float(value) if value is not None else None
+
         return {
-            CONF_BATTERY_CAPACITY_KWH: float(capacity)
-            if capacity is not None
-            else None,
+            CONF_BATTERY_CAPACITY_KWH: number(CONF_BATTERY_CAPACITY_KWH),
+            CONF_CHARGING_LOSS_AC: number(CONF_CHARGING_LOSS_AC),
+            CONF_CHARGING_LOSS_DC: number(CONF_CHARGING_LOSS_DC),
             CONF_DEFAULT_TARIFF_ID: user_input.get(CONF_DEFAULT_TARIFF_ID) or None,
             CONF_CHARGING_ENTITY_ID: user_input.get(CONF_CHARGING_ENTITY_ID) or None,
             CONF_SOC_ENTITY_ID: user_input.get(CONF_SOC_ENTITY_ID) or None,

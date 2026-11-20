@@ -146,13 +146,22 @@ input entities to book a session:
 
 | Entity | Purpose |
 | --- | --- |
-| Input energy | Charged energy in kWh (required) |
+| Input energy | Charged energy in kWh. Empty: calculated from the entered start and end SoC and the battery capacity |
 | Input cost (optional) | Total amount; overrides the tariff calculation, 0 is allowed |
 | Input tariff | Preset with the vehicle's default tariff |
 | Input charge type | AC or DC; follows the tariff if it has only one price |
 | Input date (optional) | Day of the session; empty means today. The current time of day is used |
 | Book session | Books the input and clears it. Time: the entered date, else the end of a detected charge, else now |
 | Reset input | Clears the input without booking (not shown on the Charging log page) |
+
+**Energy from SoC:** If you leave the energy empty but enter the start and
+end SoC by hand, and the vehicle has a battery capacity, the energy is
+calculated as `(end SoC − start SoC) / 100 × capacity`, plus the vehicle's
+charging loss for the charge type. Set the charging loss for AC and DC (in
+%) in the vehicle settings; empty means 0 %, i.e. only the energy that
+reached the battery. Prefer the value from the receipt when you have it.
+SoC values remembered by the charge detection are not used for this. The
+same works for the `add_session` action (without `energy_kwh`).
 
 ### Sensors
 
@@ -162,7 +171,8 @@ sessions), number of sessions, cost per 100 km (with an odometer sensor;
 charging cost since the first odometer reading, without monthly fees), and
 cost, energy, time and tariff of the last session. If you enter SoC values, the charged SoC
 points, the calculated charging loss and the cost per SoC point of the last
-session are shown as well – for display only, never used for costs.
+session are shown as well. For a session whose energy was calculated from the
+SoC, the charging loss reflects the vehicle's configured charging loss.
 
 Per tariff: total cost (including its monthly fees) and total energy.
 
@@ -219,7 +229,8 @@ Correction rules (also for the edit dialog on the Charging log page):
 changing only the energy keeps the stored price; changing the tariff or the
 charge type uses the tariff's price valid on the session's day; changing
 the day uses the price valid on the new day; a manually entered cost stays
-until it is changed or cleared.
+until it is changed or cleared. `energy_from_soc: true` (in the dialog: an
+empty energy field) recalculates the energy from the session's SoC.
 
 Deleting a vehicle also deletes its sessions and monthly fees. Deleting a
 tariff keeps the sessions and fees with their stored cost.

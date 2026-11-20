@@ -31,6 +31,8 @@ NO_DETECTION = {
     "reminder_excluded_zones": [],
     "notify_services": [],
     "odometer_entity_id": None,
+    "charging_loss_ac": None,
+    "charging_loss_dc": None,
 }
 
 
@@ -332,6 +334,22 @@ async def test_add_vehicle_minimal(hass: HomeAssistant, vehicles) -> None:
         "default_tariff_id": None,
         **NO_DETECTION,
     }
+
+
+async def test_add_vehicle_with_charging_loss(hass: HomeAssistant, vehicles) -> None:
+    result = await _start(hass, vehicles, "vehicle")
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"],
+        {
+            "name": "Dolphin Surf",
+            "battery_capacity_kwh": 43.2,
+            "charging_loss_ac": 10,
+            "charging_loss_dc": 1,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    data = _sub(vehicles, "Dolphin Surf").data
+    assert (data["charging_loss_ac"], data["charging_loss_dc"]) == (10.0, 1.0)
 
 
 async def test_add_vehicle_with_detection_entities(

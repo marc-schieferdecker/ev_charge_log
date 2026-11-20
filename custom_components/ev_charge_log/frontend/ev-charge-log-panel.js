@@ -319,9 +319,29 @@ const STYLE = `
     color: var(--error-color);
     border-color: var(--error-color);
   }
+  .buttons button.danger-filled {
+    background: var(--error-color);
+    border-color: var(--error-color);
+    color: var(--text-primary-color, #fff);
+  }
   .buttons button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  /* Small confirmation on top of another dialog. */
+  .overlay.confirm {
+    z-index: 11;
+  }
+  .dialog.confirm {
+    max-width: 340px;
+  }
+  .dialog.confirm p {
+    margin: 0 0 20px;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .dialog.confirm .buttons {
+    justify-content: flex-end;
   }
   /* Top row: tariff statistics left, the booking form right. Same columns
      as the vehicle grid below; both cards as high as the higher one. */
@@ -1178,8 +1198,12 @@ class EvChargeLogPanel extends HTMLElement {
     };
 
     cancelButton.addEventListener("click", close);
-    deleteButton.addEventListener("click", () => {
-      if (!window.confirm(texts.panel_delete_confirm)) return;
+    deleteButton.addEventListener("click", async () => {
+      const confirmed = await this._confirm(
+        texts.panel_delete_confirm,
+        texts.panel_delete
+      );
+      if (!confirmed) return;
       run("delete_session", { vehicle: vehicle.device_id, session_id: session.id });
     });
     saveButton.addEventListener("click", () => {
@@ -1188,12 +1212,17 @@ class EvChargeLogPanel extends HTMLElement {
         // Keep the time of day; a time without offset is HA local time.
         changes.timestamp = `${dateInput.value}T${time}`;
       }
-      const energy = this._parse(energyInput.value);
-      if (energy === null || energy <= 0) {
-        error.textContent = `${texts.panel_field_energy}: ${energyInput.value}`;
-        return;
+      // Empty energy: calculate it from the SoC and the battery capacity.
+      if (energyInput.value.trim() === "") {
+        changes.energy_from_soc = true;
+      } else {
+        const energy = this._parse(energyInput.value);
+        if (energy === null || energy <= 0) {
+          error.textContent = `${texts.panel_field_energy}: ${energyInput.value}`;
+          return;
+        }
+        if (energy !== session.energy_kwh) changes.energy_kwh = energy;
       }
-      if (energy !== session.energy_kwh) changes.energy_kwh = energy;
       if (chargeType.value !== session.charge_type) {
         changes.charge_type = chargeType.value;
       }
@@ -1244,6 +1273,58 @@ class EvChargeLogPanel extends HTMLElement {
 
     root.appendChild(overlay);
     energyInput.focus();
+  }
+
+  // Small modal instead of window.confirm. Resolves true on the confirm
+  // button; false on cancel, a tap outside or Escape.
+  _confirm(message, confirmLabel) {
+    const texts = this._data.texts;
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.className = "overlay confirm";
+      const dialog = document.createElement("div");
+      dialog.className = "dialog confirm";
+      dialog.setAttribute("role", "alertdialog");
+      dialog.setAttribute("aria-modal", "true");
+      overlay.appendChild(dialog);
+
+      const text = document.createElement("p");
+      text.textContent = message;
+      dialog.appendChild(text);
+
+      const buttons = document.createElement("div");
+      buttons.className = "buttons";
+      const cancelButton = document.createElement("button");
+      cancelButton.type = "button";
+      cancelButton.textContent = texts.panel_cancel;
+      const confirmButton = document.createElement("button");
+      confirmButton.type = "button";
+      confirmButton.className = "danger-filled";
+      confirmButton.textContent = confirmLabel;
+      buttons.append(cancelButton, confirmButton);
+      dialog.appendChild(buttons);
+
+      const done = (result) => {
+        document.removeEventListener("keydown", onKey, true);
+        overlay.remove();
+        resolve(result);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") {
+          ev.stopPropagation();
+          done(false);
+        }
+      };
+      document.addEventListener("keydown", onKey, true);
+      overlay.addEventListener("click", (ev) => {
+        if (ev.target === overlay) done(false);
+      });
+      cancelButton.addEventListener("click", () => done(false));
+      confirmButton.addEventListener("click", () => done(true));
+
+      this.shadowRoot.appendChild(overlay);
+      cancelButton.focus();
+    });
   }
 
   _errorText(err) {

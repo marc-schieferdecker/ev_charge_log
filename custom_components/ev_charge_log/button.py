@@ -40,10 +40,6 @@ class BookButton(EvChargeLogEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Book; on invalid input show an error and keep the input."""
-        if self._coord.inputs[self._subentry_id].energy_kwh is None:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="energy_required"
-            )
         try:
             await self._coord.async_book_input(self._subentry_id, dt_util.now())
         except ValidationError as err:

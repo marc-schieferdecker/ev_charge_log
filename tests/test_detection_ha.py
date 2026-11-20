@@ -10,6 +10,7 @@ import pytest
 pytest.importorskip("pytest_homeassistant_custom_component")
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -517,3 +518,43 @@ async def test_booking_dated_on_charge_day_takes_pending_charge(
     session = entry.runtime_data.log.last_session("seal")
     assert (session.soc_start, session.soc_end) == (31.0, 80.0)
     assert session.source == "reminder"
+
+
+# --- energy from SoC ------------------------------------------------------------
+
+
+async def test_detected_soc_does_not_give_the_energy(
+    hass: HomeAssistant, entry
+) -> None:
+    await _charge(hass, "31", "80")
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            "button",
+            "press",
+            {"entity_id": _entity(hass, "button", "seal", "book")},
+            blocking=True,
+        )
+    assert err.value.translation_key == "error_energy_required"
+    assert entry.runtime_data.log.sessions() == []
+    assert entry.runtime_data.detection["seal"].pending is not None
+
+
+async def test_soc_by_hand_gives_the_energy_and_takes_the_charge(
+    hass: HomeAssistant, entry
+) -> None:
+    await _charge(hass, "31", "80")
+    ended = entry.runtime_data.detection["seal"].pending.ended_at
+    await _set_number(hass, "seal", "input_soc_start", 30)
+    await _set_number(hass, "seal", "input_soc_end", 80)
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": _entity(hass, "button", "seal", "book")},
+        blocking=True,
+    )
+    session = entry.runtime_data.log.last_session("seal")
+    assert session.energy_kwh == 43.5  # 50 % of 87 kWh
+    assert (session.soc_start, session.soc_end) == (30.0, 80.0)
+    assert session.timestamp == ended
+    assert session.source == "reminder"
+    assert entry.runtime_data.detection["seal"].pending is None

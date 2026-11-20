@@ -93,10 +93,10 @@ async def test_panel_websocket_lists_vehicles(
     assert seal["book"]["name"] == "Ladung buchen"
     # Short names without the vehicle name.
     assert [row["name"] for row in seal["input"]] == [
-        "Datum (optional)",
+        "Datum",
         "Energie",
-        "Betrag (optional)",
-        "SoC (optional)",
+        "Betrag",
+        "SoC",
         "Tarif",
         "Ladeart",
     ]
@@ -396,7 +396,10 @@ async def test_panel_sends_translated_error_messages(hass: HomeAssistant) -> Non
     await setup_entries(hass, SUBENTRIES)
     result = await async_panel_data(hass)
     errors = result["errors"]
-    assert errors["energy_required"] == "Bitte zuerst die geladene Energie eingeben."
+    assert (
+        errors["error_energy_required"]
+        == "Bitte die geladene Energie oder Start- und End-SoC eingeben."
+    )
     # Placeholders are filled by the panel.
     assert (
         errors["error_no_price"] == "Der Tarif {tariff} hat keinen {charge_type}-Preis."

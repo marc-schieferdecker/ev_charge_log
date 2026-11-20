@@ -72,6 +72,7 @@ from .models import (
     hourly_statistics,
     parse_reply,
 )
+from .models import energy_from_soc as calculate_energy_from_soc
 from .statistics import (
     KIND_COST,
     KIND_ENERGY,
@@ -831,9 +832,22 @@ class EvChargeLogCoordinator:
         the end time of a detected charge (if no time was given) and the
         start/end SoC. A booking that takes over a detected charge gets the
         source "reminder"; the detected values are dropped afterwards.
+
+        Without energy, it is calculated from the SoC given by hand and the
+        battery capacity. Detected SoC values never count for the energy.
         """
         self._require_vehicle(data.vehicle_id)
         vehicle = self.vehicles[data.vehicle_id]
+        if data.energy_kwh is None:
+            data = replace(
+                data,
+                energy_kwh=calculate_energy_from_soc(
+                    data.soc_start,
+                    data.soc_end,
+                    vehicle.battery_capacity_kwh,
+                    vehicle.charging_loss(data.charge_type),
+                ),
+            )
         current = self.detection.get(data.vehicle_id, DetectionState())
         # A session entered later for an earlier day must not get today's SoC,
         # nor take over a detected charge that ended on a later day.
@@ -876,10 +890,29 @@ class EvChargeLogCoordinator:
         return session
 
     async def async_update_session(
-        self, vehicle_id: str, session_id: str | None = None, **changes: Any
+        self,
+        vehicle_id: str,
+        session_id: str | None = None,
+        *,
+        energy_from_soc: bool = False,
+        **changes: Any,
     ) -> Session:
-        """Correct a session (last one of the vehicle without ID)."""
+        """Correct a session (last one of the vehicle without ID).
+
+        `energy_from_soc`: recalculate the energy from the session's SoC after
+        this correction, the vehicle's battery capacity and its charging loss
+        for the (corrected) charge type.
+        """
         self._require_vehicle(vehicle_id)
+        if energy_from_soc:
+            old = self.log.resolve(vehicle_id, session_id)
+            vehicle = self.vehicles[vehicle_id]
+            changes["energy_kwh"] = calculate_energy_from_soc(
+                changes.get("soc_start", old.soc_start),
+                changes.get("soc_end", old.soc_end),
+                vehicle.battery_capacity_kwh,
+                vehicle.charging_loss(changes.get("charge_type", old.charge_type)),
+            )
         session = self.log.update(vehicle_id, self.tariffs, session_id, **changes)
         await self._async_commit()
         return session
@@ -950,8 +983,6 @@ class EvChargeLogCoordinator:
         sensible order.
         """
         current = self.inputs[vehicle_id]
-        if current.energy_kwh is None:
-            raise ValidationError("energy_kwh is required", "energy_required")
         timestamp = (
             now
             if current.day is None

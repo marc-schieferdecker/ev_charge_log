@@ -19,10 +19,12 @@ from custom_components.ev_charge_log.models import (
     SessionInput,
     Tariff,
     ValidationError,
+    Vehicle,
     build_session,
     calculate_cost,
     cost_per_100,
     daily_totals,
+    energy_from_soc,
     export_csv,
     month_totals,
     parse_reply,
@@ -304,6 +306,83 @@ def test_soc_metrics_without_capacity_has_no_loss() -> None:
 def test_soc_metrics_missing_soc() -> None:
     session = build_session("s1", _input(tariff_id="enbw", soc_start=20), ENBW)
     assert soc_metrics(session, 75.0) is None
+
+
+# --- energy from SoC ------------------------------------------------------
+
+
+def test_energy_from_soc() -> None:
+    # 60 % of 75 kWh
+    assert energy_from_soc(20, 80, 75.0) == 45.0
+    # 0 is a valid start SoC
+    assert energy_from_soc(0, 100, 60.48) == 60.48
+
+
+def test_energy_from_soc_is_rounded() -> None:
+    # 33 % of 87 kWh = 28.71; 1 % of 60.48 = 0.6048 -> 0.60
+    assert energy_from_soc(31, 64, 87.0) == 28.71
+    assert energy_from_soc(50, 51, 60.48) == 0.6
+    assert energy_from_soc(10.5, 20, 50.0) == 4.75
+
+
+@pytest.mark.parametrize(("start", "end"), [(None, 80), (20, None), (None, None)])
+def test_energy_from_soc_needs_both_soc(start, end) -> None:
+    with pytest.raises(ValidationError) as err:
+        energy_from_soc(start, end, 75.0)
+    assert err.value.key == "error_energy_required"
+
+
+@pytest.mark.parametrize("capacity", [None, 0.0])
+def test_energy_from_soc_needs_capacity(capacity) -> None:
+    with pytest.raises(ValidationError) as err:
+        energy_from_soc(20, 80, capacity)
+    assert err.value.key == "error_energy_soc_capacity"
+
+
+@pytest.mark.parametrize(("start", "end"), [(80, 80), (80, 20), (50, 50.001)])
+def test_energy_from_soc_needs_rising_soc(start, end) -> None:
+    with pytest.raises(ValidationError) as err:
+        energy_from_soc(start, end, 75.0)
+    assert err.value.key == "error_energy_soc_order"
+
+
+def test_energy_from_soc_adds_charging_loss() -> None:
+    # 60 % of 75 kWh = 45 kWh in the battery, plus 1 % -> 45.45 kWh
+    assert energy_from_soc(20, 80, 75.0, 1.0) == 45.45
+    # 0 % is the same as no loss
+    assert energy_from_soc(20, 80, 75.0, 0.0) == 45.0
+    # Rounded once at the end: 33 % of 87 kWh = 28.71, x 1.085 = 31.15035
+    assert energy_from_soc(31, 64, 87.0, 8.5) == 31.15
+
+
+def test_vehicle_charging_loss_per_charge_type() -> None:
+    vehicle = Vehicle(id="v", name="Surf", charging_loss_ac=10, charging_loss_dc=1)
+    assert vehicle.charging_loss("ac") == 10
+    assert vehicle.charging_loss("dc") == 1
+    assert Vehicle(id="v", name="Surf").charging_loss("dc") == 0.0
+    loaded = Vehicle.from_dict(
+        {"id": "v", "name": "Surf", "charging_loss_ac": None, "charging_loss_dc": 1}
+    )
+    assert (loaded.charging_loss("ac"), loaded.charging_loss("dc")) == (0.0, 1.0)
+
+
+@pytest.mark.parametrize("loss", [-1, 100])
+def test_vehicle_rejects_invalid_charging_loss(loss: float) -> None:
+    with pytest.raises(ValidationError) as err:
+        Vehicle(id="v", name="Surf", charging_loss_dc=loss)
+    assert err.value.key == "error_charging_loss"
+
+
+def test_energy_from_soc_rejects_soc_out_of_range() -> None:
+    with pytest.raises(ValidationError) as err:
+        energy_from_soc(20, 120, 75.0)
+    assert err.value.key == "error_soc_end_range"
+
+
+def test_build_session_without_energy_is_rejected() -> None:
+    with pytest.raises(ValidationError) as err:
+        build_session("s1", _input(energy_kwh=None, tariff_id="enbw"), ENBW)
+    assert err.value.key == "error_energy_required"
 
 
 # --- price versions (stage 3) ---------------------------------------------

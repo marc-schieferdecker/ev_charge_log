@@ -43,7 +43,7 @@ _SESSION_FIELDS = {
 ADD_SCHEMA = vol.Schema(
     {
         vol.Required("vehicle"): cv.string,
-        vol.Required("energy_kwh"): _NUMBER,
+        vol.Optional("energy_kwh"): _NUMBER,
         vol.Optional("charge_type", default=CHARGE_TYPE_AC): vol.In(CHARGE_TYPES),
         **_SESSION_FIELDS,
     }
@@ -53,6 +53,7 @@ UPDATE_SCHEMA = vol.Schema(
         vol.Required("vehicle"): cv.string,
         vol.Optional("session_id"): cv.string,
         vol.Optional("energy_kwh"): _NUMBER,
+        vol.Optional("energy_from_soc"): cv.boolean,
         vol.Optional("charge_type"): vol.In(CHARGE_TYPES),
         vol.Optional("clear_cost"): cv.boolean,
         vol.Optional("clear_soc_start"): cv.boolean,
@@ -154,7 +155,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
         session_input = SessionInput(
             vehicle_id=vehicle_id,
-            energy_kwh=data["energy_kwh"],
+            energy_kwh=data.get("energy_kwh"),
             charge_type=data["charge_type"],
             timestamp=_aware(data.get("timestamp")) or dt_util.now(),
             tariff_id=tariff_id,
@@ -204,8 +205,16 @@ def async_register_services(hass: HomeAssistant) -> None:
                 if name in data:
                     raise _error(f"{name}_conflict")
                 changes[name] = None
+        from_soc = bool(data.get("energy_from_soc"))
+        if from_soc and "energy_kwh" in data:
+            raise _error("energy_conflict")
         session = await _run(
-            coord.async_update_session(vehicle_id, data.get("session_id"), **changes)
+            coord.async_update_session(
+                vehicle_id,
+                data.get("session_id"),
+                energy_from_soc=from_soc,
+                **changes,
+            )
         )
         return {"session": _to_response(coord, session)}
 

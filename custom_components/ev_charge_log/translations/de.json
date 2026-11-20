@@ -22,6 +22,8 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Akkukapazität",
+            "charging_loss_ac": "Ladeverlust AC",
+            "charging_loss_dc": "Ladeverlust DC",
             "default_tariff_id": "Standardtarif",
             "charging_entity_id": "Ladestatus",
             "soc_entity_id": "Ladezustand (SoC)",
@@ -31,7 +33,9 @@
             "notify_services": "Handys benachrichtigen"
           },
           "data_description": {
-            "battery_capacity_kwh": "Optional. Nur für Anzeigewerte wie den rechnerischen Ladeverlust, nie für Kosten.",
+            "battery_capacity_kwh": "Optional. Für Anzeigewerte wie den rechnerischen Ladeverlust. Ohne eingegebene Energie wird die Energie aus Start- und End-SoC und der Akkukapazität berechnet.",
+            "charging_loss_ac": "Optional, in %. Wird auf die aus dem SoC berechnete Energie aufgeschlagen, wenn AC geladen wurde. Leer: 0 %.",
+            "charging_loss_dc": "Optional, in %. Wird auf die aus dem SoC berechnete Energie aufgeschlagen, wenn DC geladen wurde. Leer: 0 %.",
             "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt.",
             "charging_entity_id": "Optional. Binärsensor, der während des Ladens „an“ ist. Aktiviert die Erinnerung nach dem Laden. Hat deine Fahrzeugintegration keinen, lege einen Template-Binärsensor an.",
             "soc_entity_id": "Optional. SoC in Prozent, wird bei Ladebeginn und Ladeende gemerkt. Nur Anzeige, nie für Kosten.",
@@ -46,6 +50,8 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Akkukapazität",
+            "charging_loss_ac": "Ladeverlust AC",
+            "charging_loss_dc": "Ladeverlust DC",
             "default_tariff_id": "Standardtarif",
             "charging_entity_id": "Ladestatus",
             "soc_entity_id": "Ladezustand (SoC)",
@@ -55,7 +61,9 @@
             "notify_services": "Handys benachrichtigen"
           },
           "data_description": {
-            "battery_capacity_kwh": "Optional. Nur für Anzeigewerte wie den rechnerischen Ladeverlust, nie für Kosten.",
+            "battery_capacity_kwh": "Optional. Für Anzeigewerte wie den rechnerischen Ladeverlust. Ohne eingegebene Energie wird die Energie aus Start- und End-SoC und der Akkukapazität berechnet.",
+            "charging_loss_ac": "Optional, in %. Wird auf die aus dem SoC berechnete Energie aufgeschlagen, wenn AC geladen wurde. Leer: 0 %.",
+            "charging_loss_dc": "Optional, in %. Wird auf die aus dem SoC berechnete Energie aufgeschlagen, wenn DC geladen wurde. Leer: 0 %.",
             "default_tariff_id": "Optional. Wird bei der Eingabe einer Ladung vorbelegt.",
             "charging_entity_id": "Optional. Binärsensor, der während des Ladens „an“ ist. Aktiviert die Erinnerung nach dem Laden. Hat deine Fahrzeugintegration keinen, lege einen Template-Binärsensor an.",
             "soc_entity_id": "Optional. SoC in Prozent, wird bei Ladebeginn und Ladeende gemerkt. Nur Anzeige, nie für Kosten.",
@@ -302,10 +310,10 @@
     "panel_label_last_session_cost": { "message": "Kosten" },
     "panel_label_last_session_energy": { "message": "Energie" },
     "panel_label_last_session_tariff": { "message": "Tarif" },
-    "panel_label_input_date": { "message": "Datum (optional)" },
+    "panel_label_input_date": { "message": "Datum" },
     "panel_label_input_energy": { "message": "Energie" },
-    "panel_label_input_cost": { "message": "Betrag (optional)" },
-    "panel_label_input_soc": { "message": "SoC (optional)" },
+    "panel_label_input_cost": { "message": "Betrag" },
+    "panel_label_input_soc": { "message": "SoC" },
     "panel_label_input_tariff": { "message": "Tarif" },
     "panel_label_input_charge_type": { "message": "Ladeart" },
     "panel_label_book": { "message": "Ladung buchen" },
@@ -320,8 +328,8 @@
     "unknown_vehicle": { "message": "Das gewählte Gerät ist kein Fahrzeug von EV Charge Log." },
     "unknown_tariff": { "message": "Das gewählte Gerät ist kein Tarif von EV Charge Log." },
     "session_not_found": { "message": "Für dieses Fahrzeug wurde keine passende Ladung gefunden." },
-    "energy_required": { "message": "Bitte zuerst die geladene Energie eingeben." },
     "cost_conflict": { "message": "Entweder einen Betrag angeben oder „Betrag entfernen“ wählen, nicht beides." },
+    "energy_conflict": { "message": "Entweder eine Energie angeben oder „Energie aus SoC berechnen“ wählen, nicht beides." },
     "soc_start_conflict": { "message": "Entweder einen Start-SoC angeben oder „SoC Beginn entfernen“ wählen, nicht beides." },
     "soc_end_conflict": { "message": "Entweder einen End-SoC angeben oder „SoC Ende entfernen“ wählen, nicht beides." },
     "error_negative_price_ac": { "message": "Der AC-Preis darf nicht negativ sein." },
@@ -333,6 +341,7 @@
     "error_negative_reference_price_ac": { "message": "Der AC-Vergleichspreis darf nicht negativ sein." },
     "error_negative_reference_price_dc": { "message": "Der DC-Vergleichspreis darf nicht negativ sein." },
     "error_capacity": { "message": "Die Akkukapazität muss größer als 0 sein." },
+    "error_charging_loss": { "message": "Der Ladeverlust muss zwischen 0 und 100 % liegen." },
     "error_price_required": { "message": "Bitte einen AC- oder einen DC-Preis angeben." },
     "error_fee_end_before_start": { "message": "Der letzte Monat der Grundgebühr liegt vor dem ersten." },
     "error_duplicate_version": { "message": "Für dieses Datum gibt es schon eine Preisversion." },
@@ -349,7 +358,9 @@
     "error_no_odometer": { "message": "Das Fahrzeug hat keinen Kilometerstand-Sensor." },
     "error_odometer_negative": { "message": "Der Kilometerstand darf nicht negativ sein." },
     "error_odometer_above": { "message": "Der Kilometerstand {start} liegt über dem aktuellen Stand {reading}." },
-    "error_energy_required": { "message": "Bitte zuerst die geladene Energie eingeben." },
+    "error_energy_required": { "message": "Bitte die geladene Energie oder Start- und End-SoC eingeben." },
+    "error_energy_soc_capacity": { "message": "Ohne Akkukapazität am Fahrzeug lässt sich die Energie nicht aus dem SoC berechnen. Bitte die Energie eingeben oder die Akkukapazität beim Fahrzeug ergänzen." },
+    "error_energy_soc_order": { "message": "Der End-SoC muss über dem Start-SoC liegen, um die Energie daraus zu berechnen." },
     "error_unknown_vehicle": { "message": "Das Fahrzeug gibt es nicht mehr." }
   },
   "services": {
@@ -358,13 +369,13 @@
       "description": "Bucht eine Ladung. Die Kosten werden jetzt aus dem Tarif berechnet und gespeichert, ein angegebener Betrag hat Vorrang.",
       "fields": {
         "vehicle": { "name": "Fahrzeug", "description": "Geladenes Fahrzeug." },
-        "energy_kwh": { "name": "Energie", "description": "Geladene Energie laut Beleg oder App des Anbieters." },
+        "energy_kwh": { "name": "Energie", "description": "Geladene Energie laut Beleg oder App des Anbieters. Leer: aus Start- und End-SoC und der Akkukapazität des Fahrzeugs berechnet, zuzüglich seines Ladeverlusts für die Ladeart." },
         "charge_type": { "name": "Ladeart", "description": "AC oder DC, bestimmt den Tarifpreis." },
         "tariff": { "name": "Tarif", "description": "Verwendeter Tarif. Pflicht, wenn kein Betrag angegeben ist." },
         "cost": { "name": "Betrag", "description": "Gesamtbetrag. Hat Vorrang vor der Tarifberechnung, 0 ist erlaubt." },
         "timestamp": { "name": "Zeitpunkt", "description": "Ende der Ladung. Ohne Angabe: jetzt." },
-        "soc_start": { "name": "SoC Beginn", "description": "Nur Anzeige, nie für Kosten." },
-        "soc_end": { "name": "SoC Ende", "description": "Nur Anzeige, nie für Kosten." },
+        "soc_start": { "name": "SoC Beginn", "description": "Anzeige. Ohne Energie: mit SoC Ende und Akkukapazität für die Berechnung der Energie." },
+        "soc_end": { "name": "SoC Ende", "description": "Anzeige. Ohne Energie: mit SoC Beginn und Akkukapazität für die Berechnung der Energie." },
         "location": { "name": "Ort", "description": "Freitext." },
         "note": { "name": "Notiz", "description": "Freitext." }
       }
@@ -376,6 +387,7 @@
         "vehicle": { "name": "Fahrzeug", "description": "Fahrzeug der Ladung." },
         "session_id": { "name": "Ladungs-ID", "description": "Zu ändernde Ladung. Ohne Angabe die letzte des Fahrzeugs." },
         "energy_kwh": { "name": "Energie", "description": "Korrigierte Energie." },
+        "energy_from_soc": { "name": "Energie aus SoC berechnen", "description": "Die Energie aus Start- und End-SoC der Ladung (nach dieser Korrektur) und der Akkukapazität des Fahrzeugs neu berechnen, zuzüglich des Ladeverlusts für die Ladeart." },
         "charge_type": { "name": "Ladeart", "description": "Korrigierte Ladeart." },
         "tariff": { "name": "Tarif", "description": "Korrigierter Tarif." },
         "cost": { "name": "Betrag", "description": "Gesamtbetrag von Hand, 0 ist erlaubt." },

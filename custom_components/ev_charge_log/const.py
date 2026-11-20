@@ -34,6 +34,9 @@ def entry_title(kind: str, language: str) -> str:
 # Config flow fields. The name is stored as the subentry title, not in data.
 CONF_NAME: Final = "name"
 CONF_BATTERY_CAPACITY_KWH: Final = "battery_capacity_kwh"
+# Charging loss in % per charge type, added to the energy calculated from SoC
+CONF_CHARGING_LOSS_AC: Final = "charging_loss_ac"
+CONF_CHARGING_LOSS_DC: Final = "charging_loss_dc"
 CONF_DEFAULT_TARIFF_ID: Final = "default_tariff_id"
 CONF_PRICE_AC: Final = "price_ac"
 CONF_PRICE_DC: Final = "price_dc"

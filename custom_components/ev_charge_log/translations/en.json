@@ -22,6 +22,8 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Battery capacity",
+            "charging_loss_ac": "Charging loss AC",
+            "charging_loss_dc": "Charging loss DC",
             "default_tariff_id": "Default tariff",
             "charging_entity_id": "Charging status",
             "soc_entity_id": "State of charge (SoC)",
@@ -31,7 +33,9 @@
             "notify_services": "Notify phones"
           },
           "data_description": {
-            "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
+            "battery_capacity_kwh": "Optional. Used for display values such as the calculated charging loss. Without entered energy, the energy is calculated from start and end SoC and the battery capacity.",
+            "charging_loss_ac": "Optional, in %. Added to the energy calculated from the SoC for AC charging. Empty: 0 %.",
+            "charging_loss_dc": "Optional, in %. Added to the energy calculated from the SoC for DC charging. Empty: 0 %.",
             "default_tariff_id": "Optional. Preselected when entering a session.",
             "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
             "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
@@ -46,6 +50,8 @@
           "data": {
             "name": "Name",
             "battery_capacity_kwh": "Battery capacity",
+            "charging_loss_ac": "Charging loss AC",
+            "charging_loss_dc": "Charging loss DC",
             "default_tariff_id": "Default tariff",
             "charging_entity_id": "Charging status",
             "soc_entity_id": "State of charge (SoC)",
@@ -55,7 +61,9 @@
             "notify_services": "Notify phones"
           },
           "data_description": {
-            "battery_capacity_kwh": "Optional. Only used for display values such as the calculated charging loss, never for costs.",
+            "battery_capacity_kwh": "Optional. Used for display values such as the calculated charging loss. Without entered energy, the energy is calculated from start and end SoC and the battery capacity.",
+            "charging_loss_ac": "Optional, in %. Added to the energy calculated from the SoC for AC charging. Empty: 0 %.",
+            "charging_loss_dc": "Optional, in %. Added to the energy calculated from the SoC for DC charging. Empty: 0 %.",
             "default_tariff_id": "Optional. Preselected when entering a session.",
             "charging_entity_id": "Optional. Binary sensor that is on while the vehicle charges. Enables the reminder after charging. If your vehicle integration has none, create a template binary sensor.",
             "soc_entity_id": "Optional. SoC in percent; remembered at the start and end of a charge. Display only, never used for costs.",
@@ -302,10 +310,10 @@
     "panel_label_last_session_cost": { "message": "Cost" },
     "panel_label_last_session_energy": { "message": "Energy" },
     "panel_label_last_session_tariff": { "message": "Tariff" },
-    "panel_label_input_date": { "message": "Date (optional)" },
+    "panel_label_input_date": { "message": "Date" },
     "panel_label_input_energy": { "message": "Energy" },
-    "panel_label_input_cost": { "message": "Cost (optional)" },
-    "panel_label_input_soc": { "message": "SoC (optional)" },
+    "panel_label_input_cost": { "message": "Cost" },
+    "panel_label_input_soc": { "message": "SoC" },
     "panel_label_input_tariff": { "message": "Tariff" },
     "panel_label_input_charge_type": { "message": "Charge type" },
     "panel_label_book": { "message": "Book session" },
@@ -320,8 +328,8 @@
     "unknown_vehicle": { "message": "The selected device is not an EV Charge Log vehicle." },
     "unknown_tariff": { "message": "The selected device is not an EV Charge Log tariff." },
     "session_not_found": { "message": "No matching session found for this vehicle." },
-    "energy_required": { "message": "Please enter the charged energy first." },
     "cost_conflict": { "message": "Use either a cost or \"Clear cost\", not both." },
+    "energy_conflict": { "message": "Use either an energy or \"Energy from SoC\", not both." },
     "soc_start_conflict": { "message": "Use either a start SoC or \"Clear SoC start\", not both." },
     "soc_end_conflict": { "message": "Use either an end SoC or \"Clear SoC end\", not both." },
     "error_negative_price_ac": { "message": "The AC price must not be negative." },
@@ -333,6 +341,7 @@
     "error_negative_reference_price_ac": { "message": "The AC reference price must not be negative." },
     "error_negative_reference_price_dc": { "message": "The DC reference price must not be negative." },
     "error_capacity": { "message": "The battery capacity must be greater than 0." },
+    "error_charging_loss": { "message": "The charging loss must be between 0 and 100 %." },
     "error_price_required": { "message": "Please enter an AC or a DC price." },
     "error_fee_end_before_start": { "message": "The last month of the fee is before the first month." },
     "error_duplicate_version": { "message": "There is already a price version for this date." },
@@ -349,7 +358,9 @@
     "error_no_odometer": { "message": "The vehicle has no odometer sensor." },
     "error_odometer_negative": { "message": "The odometer reading must not be negative." },
     "error_odometer_above": { "message": "The odometer reading {start} is above the current reading {reading}." },
-    "error_energy_required": { "message": "Please enter the charged energy first." },
+    "error_energy_required": { "message": "Please enter the charged energy or start and end SoC." },
+    "error_energy_soc_capacity": { "message": "Without a battery capacity on the vehicle, the energy cannot be calculated from the SoC. Please enter the energy or add the battery capacity to the vehicle." },
+    "error_energy_soc_order": { "message": "The end SoC must be above the start SoC to calculate the energy from it." },
     "error_unknown_vehicle": { "message": "The vehicle no longer exists." }
   },
   "services": {
@@ -358,13 +369,13 @@
       "description": "Books a charging session. The cost is calculated from the tariff now and stored; a given cost overrides the tariff.",
       "fields": {
         "vehicle": { "name": "Vehicle", "description": "Vehicle that was charged." },
-        "energy_kwh": { "name": "Energy", "description": "Charged energy from the receipt or the provider's app." },
+        "energy_kwh": { "name": "Energy", "description": "Charged energy from the receipt or the provider's app. Empty: calculated from start and end SoC and the vehicle's battery capacity, plus its charging loss for the charge type." },
         "charge_type": { "name": "Charge type", "description": "AC or DC; selects the tariff price." },
         "tariff": { "name": "Tariff", "description": "Tariff used. Required unless a cost is given." },
         "cost": { "name": "Cost", "description": "Total amount. Overrides the tariff calculation; 0 is allowed." },
         "timestamp": { "name": "Time", "description": "End of charging. Defaults to now." },
-        "soc_start": { "name": "SoC start", "description": "Display only, never used for costs." },
-        "soc_end": { "name": "SoC end", "description": "Display only, never used for costs." },
+        "soc_start": { "name": "SoC start", "description": "Display value. Without energy: used with the end SoC and the battery capacity to calculate the energy." },
+        "soc_end": { "name": "SoC end", "description": "Display value. Without energy: used with the start SoC and the battery capacity to calculate the energy." },
         "location": { "name": "Location", "description": "Free text." },
         "note": { "name": "Note", "description": "Free text." }
       }
@@ -376,6 +387,7 @@
         "vehicle": { "name": "Vehicle", "description": "Vehicle of the session." },
         "session_id": { "name": "Session ID", "description": "Session to change. Defaults to the vehicle's last session." },
         "energy_kwh": { "name": "Energy", "description": "Corrected energy." },
+        "energy_from_soc": { "name": "Energy from SoC", "description": "Recalculate the energy from the start and end SoC of the session (after this correction) and the vehicle's battery capacity, plus the charging loss for the charge type." },
         "charge_type": { "name": "Charge type", "description": "Corrected charge type." },
         "tariff": { "name": "Tariff", "description": "Corrected tariff." },
         "cost": { "name": "Cost", "description": "Manual total amount; 0 is allowed." },
