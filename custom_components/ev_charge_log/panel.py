@@ -35,6 +35,7 @@ from .models import (
     export_csv,
     month_of,
     month_totals,
+    parse_import_csv,
     tariff_month_stats,
 )
 
@@ -47,6 +48,9 @@ WS_TYPE = f"{DOMAIN}/panel"
 WS_HISTORY_TYPE = f"{DOMAIN}/panel_history"
 WS_TARIFF_STATS_TYPE = f"{DOMAIN}/panel_tariff_stats"
 WS_EXPORT_TYPE = f"{DOMAIN}/panel_export"
+WS_IMPORT_TYPE = f"{DOMAIN}/panel_import"
+# Header texts of these languages are always understood by the import.
+IMPORT_LANGUAGES = ("en", "de")
 _MONTH = vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
@@ -133,6 +137,13 @@ TEXT_KEYS = (
     "panel_export_from",
     "panel_export_to",
     "panel_export_download",
+    "panel_import",
+    "panel_import_title",
+    "panel_import_file",
+    "panel_import_start",
+    "panel_import_result",
+    "panel_import_row",
+    "panel_close",
 )
 SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
@@ -163,6 +174,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, websocket_tariff_stats)
         websocket_api.async_register_command(hass, websocket_set_soc)
         websocket_api.async_register_command(hass, websocket_export)
+        websocket_api.async_register_command(hass, websocket_import)
         hass.data[_SETUP_DONE] = True
 
     # The frontend is a soft dependency (after_dependencies): always loaded in
@@ -313,18 +325,9 @@ async def websocket_export(
     connection.send_result(msg["id"], result)
 
 
-async def async_export(
-    hass: HomeAssistant,
-    coord: EvChargeLogCoordinator,
-    vehicle_id: str,
-    start: date | None,
-    end: date | None,
-    decimal: str,
-) -> dict[str, str]:
-    """File name and CSV text of the export, header in the HA language."""
-    translations = await async_get_translations(
-        hass, hass.config.language, "exceptions", [DOMAIN]
-    )
+async def _export_texts(hass: HomeAssistant, language: str) -> dict[str, str]:
+    """Header and value texts of the CSV file in a language."""
+    translations = await async_get_translations(hass, language, "exceptions", [DOMAIN])
     prefix = f"component.{DOMAIN}.exceptions.panel_export"
     currency = hass.config.currency
     texts = {
@@ -336,6 +339,69 @@ async def async_export(
     texts |= {
         key: translations.get(f"{prefix}_{key}.message", key) for key in EXPORT_VALUES
     }
+    return texts
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_IMPORT_TYPE,
+        vol.Required("vehicle_id"): str,
+        vol.Required("csv"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_import(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Import sessions of one vehicle from a CSV file of the export (stage 7).
+
+    A broken file is an error with the translation key as code; broken rows
+    are listed in the result with row number, key and placeholders.
+    """
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None or msg["vehicle_id"] not in coord.vehicles:
+        connection.send_error(msg["id"], "not_found", "Unknown vehicle")
+        return
+    try:
+        result = await async_import(hass, coord, msg["vehicle_id"], msg["csv"])
+    except ValidationError as err:
+        connection.send_error(msg["id"], err.key, str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+async def async_import(
+    hass: HomeAssistant, coord: EvChargeLogCoordinator, vehicle_id: str, text: str
+) -> dict[str, Any]:
+    """Read and book an import file; headers in English, German or HA language."""
+    languages = dict.fromkeys((hass.config.language, *IMPORT_LANGUAGES))
+    texts = [await _export_texts(hass, language) for language in languages]
+    parsed = parse_import_csv(text, texts, dt_util.get_default_time_zone())
+    result = await coord.async_import_sessions(vehicle_id, parsed.rows)
+    problems = sorted([*parsed.problems, *result.problems], key=lambda p: p.row)
+    return {
+        "imported": len(result.sessions),
+        "duplicates": result.duplicates,
+        "fees_skipped": parsed.fees_skipped,
+        "errors": [
+            {"row": p.row, "key": p.key, "placeholders": p.placeholders}
+            for p in problems
+        ],
+    }
+
+
+async def async_export(
+    hass: HomeAssistant,
+    coord: EvChargeLogCoordinator,
+    vehicle_id: str,
+    start: date | None,
+    end: date | None,
+    decimal: str,
+) -> dict[str, str]:
+    """File name and CSV text of the export, header in the HA language."""
+    texts = await _export_texts(hass, hass.config.language)
     vehicle = coord.vehicles[vehicle_id]
     text = export_csv(
         coord.log.sessions(vehicle_id=vehicle_id),

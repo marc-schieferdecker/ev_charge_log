@@ -584,6 +584,65 @@ async def test_panel_export_websocket(hass: HomeAssistant, hass_ws_client) -> No
     assert response["error"]["code"] == "not_found"
 
 
+async def test_panel_import_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    hass.config.language = "de"
+    hass.config.currency = "EUR"
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    result = await async_panel_data(hass)
+    assert "panel_import_title" in result["texts"]
+    assert "error_import_value" in result["errors"]
+
+    # English header although HA runs in German; one fee, one broken row.
+    text = (
+        "﻿Type,Date,Time,Energy (kWh),Charge type,Tariff,Cost (USD)\r\n"
+        "Monthly fee,2026-11-01,,,,EnBW,11.99\r\n"
+        "Session,2026-11-03,18:30,10,AC,EnBW,\r\n"
+        "Session,2026-11-04,18:30,10,DC,Ionity,4.5\r\n"
+        "Session,2026-11-05,18:30,ten,AC,EnBW,\r\n"
+    )
+    client = await hass_ws_client(hass)
+    message = {"type": "ev_charge_log/panel_import", "vehicle_id": "seal", "csv": text}
+    await client.send_json_auto_id(message)
+    response = await client.receive_json()
+    assert response["success"], response
+    assert response["result"] == {
+        "imported": 2,
+        "duplicates": 0,
+        "fees_skipped": 1,
+        "errors": [
+            {
+                "row": 5,
+                "key": "error_import_value",
+                "placeholders": {"column": "Energy (kWh)", "value": "ten"},
+            }
+        ],
+    }
+    sessions = coord.log.sessions(vehicle_id="seal")
+    assert [(s.tariff_id, s.cost) for s in sessions] == [("enbw", 5.9), (None, 4.5)]
+    assert dt_util.as_local(sessions[0].timestamp).hour == 18
+    await hass.async_block_till_done()
+    count = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, "seal_session_count"
+    )
+    assert hass.states.get(count).state == "2"
+
+    # The same file again: only duplicates.
+    await client.send_json_auto_id(message)
+    response = await client.receive_json()
+    assert response["result"]["imported"] == 0
+    assert response["result"]["duplicates"] == 2
+
+    await client.send_json_auto_id({**message, "csv": "Foo;Bar\n1;2\n"})
+    response = await client.receive_json()
+    assert response["error"]["code"] == "error_import_header"
+
+    await client.send_json_auto_id({**message, "vehicle_id": "nope"})
+    response = await client.receive_json()
+    assert response["error"]["code"] == "not_found"
+
+
 async def test_panel_shows_odometer_below_total_energy(hass: HomeAssistant) -> None:
     hass.config.language = "de"
     hass.states.async_set(

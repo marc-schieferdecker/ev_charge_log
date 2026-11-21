@@ -62,6 +62,8 @@ from .detection import (
     on_charging_state,
 )
 from .models import (
+    ImportResult,
+    ImportRow,
     OdometerBaseline,
     Session,
     SessionInput,
@@ -902,6 +904,22 @@ class EvChargeLogCoordinator:
                 )
         await self._async_commit()
         return session
+
+    async def async_import_sessions(
+        self, vehicle_id: str, rows: list[ImportRow]
+    ) -> ImportResult:
+        """Book the rows of an import file (stage 7), saved once.
+
+        The charge detection is not touched: imported sessions are older
+        charges, their source comes from the file.
+        """
+        self._require_vehicle(vehicle_id)
+        result = self.log.import_rows(
+            self.vehicles[vehicle_id], rows, self.tariffs, dt_util.as_local
+        )
+        if result.sessions:
+            await self._async_commit()
+        return result
 
     async def async_update_session(
         self,

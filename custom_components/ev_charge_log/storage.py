@@ -16,12 +16,18 @@ from typing import Any, Final
 
 from .models import (
     Fee,
+    ImportProblem,
+    ImportResult,
+    ImportRow,
     Session,
     SessionInput,
     Summary,
     Tariff,
     ValidationError,
+    Vehicle,
+    build_imported_session,
     build_session,
+    duplicate_key,
     round_money,
     summarize,
 )
@@ -145,6 +151,49 @@ class SessionLog:
         session = build_session(self._id_factory(), data, tariff)
         self._sessions[session.id] = session
         return session
+
+    def import_rows(
+        self,
+        vehicle: Vehicle,
+        rows: Iterable[ImportRow],
+        tariffs: Mapping[str, Tariff],
+        to_local: Callable[[datetime], datetime],
+    ) -> ImportResult:
+        """Book imported rows (stage 7); invalid rows become problems.
+
+        The tariff is found by its name (case-insensitive); an unknown name
+        books without tariff. Rows with the same local minute and energy as
+        a session of the vehicle (or an earlier row) are skipped.
+        """
+        by_name: dict[str, Tariff] = {}
+        for tariff in tariffs.values():
+            by_name.setdefault(tariff.name.casefold(), tariff)
+        seen = {
+            duplicate_key(to_local(s.timestamp), s.energy_kwh)
+            for s in self.sessions(vehicle_id=vehicle.id)
+        }
+        result = ImportResult(sessions=[])
+        for row in rows:
+            tariff = (
+                by_name.get(row.tariff_name.casefold()) if row.tariff_name else None
+            )
+            try:
+                session = build_imported_session(
+                    self._id_factory(), vehicle, row, tariff
+                )
+            except ValidationError as err:
+                result.problems.append(
+                    ImportProblem(row.row, err.key, err.placeholders)
+                )
+                continue
+            key = duplicate_key(to_local(session.timestamp), session.energy_kwh)
+            if key in seen:
+                result.duplicates += 1
+                continue
+            seen.add(key)
+            self._sessions[session.id] = session
+            result.sessions.append(session)
+        return result
 
     def update(
         self,

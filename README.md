@@ -141,6 +141,17 @@ sessions and monthly fees of a chosen period as a CSV file. It opens directly
 in Excel: with a decimal comma (e.g. German) the cells are separated by `;`,
 otherwise by `,`.
 
+The upload button next to it imports such a file into the vehicle, e.g. to
+restore a backup, move to a new installation or bring back sessions you
+corrected in Excel. Columns are found by their header (English or German,
+in any order); date, charge type and energy (or start and end SoC) are
+required. Costs and prices are taken from the file as they are; rows
+without a cost are calculated from the tariff (found by its name). Rows
+that already exist (same minute and energy) are skipped, so importing the
+same file twice books nothing twice. Monthly fee rows are skipped, fees are
+booked automatically. Invalid rows are listed with their row number, all
+other rows are booked.
+
 You can also use the entities on your own dashboards. Every vehicle gets
 input entities to book a session:
 
