@@ -310,7 +310,16 @@ async def test_panel_lists_sessions_newest_first(hass: HomeAssistant) -> None:
     assert seal["sessions"][-1]["soc_end"] is None
 
     assert result["tariffs"] == [
-        {"id": "enbw", "name": "EnBW", "device_id": result["tariffs"][0]["device_id"]}
+        {
+            "id": "enbw",
+            "name": "EnBW",
+            "device_id": result["tariffs"][0]["device_id"],
+            "price_ac": 0.59,
+            "price_dc": 0.69,
+            "monthly_fee": None,
+            "reference_price_ac": None,
+            "reference_price_dc": None,
+        }
     ]
     assert result["tariffs"][0]["device_id"]
     assert result["texts"]["panel_save"] == "Save"
@@ -641,6 +650,71 @@ async def test_panel_import_websocket(hass: HomeAssistant, hass_ws_client) -> No
     await client.send_json_auto_id({**message, "vehicle_id": "nope"})
     response = await client.receive_json()
     assert response["error"]["code"] == "not_found"
+
+
+async def test_panel_compare_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    from datetime import datetime
+
+    from custom_components.ev_charge_log.models import SessionInput
+
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    tz = dt_util.get_default_time_zone()
+    for vehicle_id, charge_type in (("seal", "ac"), ("seal", "dc"), ("dolphin", "ac")):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id=vehicle_id,
+                energy_kwh=10.0,
+                charge_type=charge_type,
+                timestamp=datetime(2026, 8, 10, 18, 30, tzinfo=tz),
+                tariff_id="enbw",
+            )
+        )
+
+    result = await async_panel_data(hass)
+    enbw = next(t for t in result["tariffs"] if t["id"] == "enbw")
+    assert (enbw["price_ac"], enbw["price_dc"], enbw["monthly_fee"]) == (
+        0.59,
+        0.69,
+        None,
+    )
+    assert "panel_compare_title" in result["texts"]
+
+    client = await hass_ws_client(hass)
+    message = {
+        "type": "ev_charge_log/panel_compare",
+        "start": "2026-08-01",
+        "end": "2026-08-31",
+        "vehicle_id": "seal",
+        "tariff_id": None,
+        "a": {"price_ac": 0.59, "price_dc": 0.69, "monthly_fee": None},
+        "b": {"price_ac": 0.39, "price_dc": None, "monthly_fee": 5.99},
+    }
+    await client.send_json_auto_id(message)
+    response = await client.receive_json()
+    assert response["success"], response
+    compare = response["result"]
+    assert (compare["session_count"], compare["months"]) == (2, 1)
+    assert compare["a"]["total"] == 12.8
+    # AC 10 x 0.39, DC without price: its actual cost 6.90, plus the fee.
+    assert compare["b"]["total"] == 16.79
+    assert compare["b"]["missing_count"] == 1
+    assert compare["difference"] == 3.99
+    assert compare["actual_total"] == 12.8
+
+    await client.send_json_auto_id({**message, "b": {"monthly_fee": 5.0}})
+    response = await client.receive_json()
+    assert response["error"]["code"] == "error_price_required"
+
+    await client.send_json_auto_id({**message, "start": "2026-09-01"})
+    response = await client.receive_json()
+    assert response["error"]["code"] == "error_compare_range"
+
+    for key in ("vehicle_id", "tariff_id"):
+        await client.send_json_auto_id({**message, key: "nope"})
+        response = await client.receive_json()
+        assert response["error"]["code"] == "not_found"
 
 
 async def test_panel_shows_odometer_below_total_energy(hass: HomeAssistant) -> None:

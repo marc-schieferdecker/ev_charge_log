@@ -32,6 +32,9 @@ from .models import (
     Session,
     TariffMonthRow,
     ValidationError,
+    WhatIfResult,
+    WhatIfTariff,
+    compare_tariffs,
     export_csv,
     month_of,
     month_totals,
@@ -51,6 +54,15 @@ WS_EXPORT_TYPE = f"{DOMAIN}/panel_export"
 WS_IMPORT_TYPE = f"{DOMAIN}/panel_import"
 # Header texts of these languages are always understood by the import.
 IMPORT_LANGUAGES = ("en", "de")
+WS_COMPARE_TYPE = f"{DOMAIN}/panel_compare"
+_PRICE = vol.Any(None, vol.Coerce(float))
+_WHAT_IF = vol.Schema(
+    {
+        vol.Optional("price_ac"): _PRICE,
+        vol.Optional("price_dc"): _PRICE,
+        vol.Optional("monthly_fee"): _PRICE,
+    }
+)
 _MONTH = vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
@@ -144,6 +156,38 @@ TEXT_KEYS = (
     "panel_import_result",
     "panel_import_row",
     "panel_close",
+    *(
+        f"panel_compare{suffix}"
+        for suffix in (
+            "",
+            "_title",
+            "_from",
+            "_to",
+            "_vehicle",
+            "_vehicle_all",
+            "_tariff",
+            "_tariff_all",
+            "_prefill",
+            "_without_subscription",
+            "_tariff_a",
+            "_tariff_b",
+            "_name",
+            "_price_ac",
+            "_price_dc",
+            "_fee",
+            "_start",
+            "_summary",
+            "_row_cost",
+            "_row_fees",
+            "_row_total",
+            "_row_average",
+            "_cheaper",
+            "_dearer",
+            "_equal",
+            "_missing",
+            "_actual",
+        )
+    ),
 )
 SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
@@ -175,6 +219,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, websocket_set_soc)
         websocket_api.async_register_command(hass, websocket_export)
         websocket_api.async_register_command(hass, websocket_import)
+        websocket_api.async_register_command(hass, websocket_compare)
         hass.data[_SETUP_DONE] = True
 
     # The frontend is a soft dependency (after_dependencies): always loaded in
@@ -390,6 +435,75 @@ async def async_import(
             for p in problems
         ],
     }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_COMPARE_TYPE,
+        vol.Required("start"): cv.date,
+        vol.Required("end"): cv.date,
+        vol.Optional("vehicle_id"): vol.Any(None, str),
+        vol.Optional("tariff_id"): vol.Any(None, str),
+        vol.Required("a"): _WHAT_IF,
+        vol.Required("b"): _WHAT_IF,
+    }
+)
+@callback
+def websocket_compare(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Tariff comparison "what if" (stage 8): nothing is stored."""
+    coord = hass.data.get(COORDINATOR_KEY)
+    vehicle_id = msg.get("vehicle_id")
+    tariff_id = msg.get("tariff_id")
+    if (
+        coord is None
+        or (vehicle_id is not None and vehicle_id not in coord.vehicles)
+        or (tariff_id is not None and tariff_id not in coord.tariffs)
+    ):
+        connection.send_error(msg["id"], "not_found", "Unknown vehicle or tariff")
+        return
+    try:
+        comparison = compare_tariffs(
+            coord.log.sessions(),
+            coord.log.fees(),
+            msg["start"],
+            msg["end"],
+            _local_day,
+            WhatIfTariff(**msg["a"]),
+            WhatIfTariff(**msg["b"]),
+            vehicle_id=vehicle_id,
+            tariff_id=tariff_id,
+        )
+    except ValidationError as err:
+        connection.send_error(msg["id"], err.key, str(err))
+        return
+
+    def side(result: WhatIfResult) -> dict[str, Any]:
+        return {
+            "cost": result.cost,
+            "fees": result.fees,
+            "total": result.total,
+            "average": result.average,
+            "missing_count": result.missing_count,
+        }
+
+    connection.send_result(
+        msg["id"],
+        {
+            "months": comparison.months,
+            "session_count": comparison.session_count,
+            "energy_kwh": comparison.energy_kwh,
+            "a": side(comparison.a),
+            "b": side(comparison.b),
+            "difference": comparison.difference,
+            "actual_cost": comparison.actual_cost,
+            "actual_fees": comparison.actual_fees,
+            "actual_total": comparison.actual_total,
+        },
+    )
 
 
 async def async_export(
@@ -643,12 +757,21 @@ async def async_panel_data(hass: HomeAssistant) -> dict[str, Any]:
                     ],
                 }
             )
+        today = dt_util.now().date()
         for tariff_id in coord.sorted_tariffs():
+            tariff = coord.tariffs[tariff_id]
+            price_ac, price_dc = tariff.prices_on(today)
             tariffs.append(
                 {
                     "id": tariff_id,
-                    "name": coord.tariffs[tariff_id].name,
+                    "name": tariff.name,
                     "device_id": device_of("sensor", f"{tariff_id}_total_cost"),
+                    # Today's values, to prefill the tariff comparison.
+                    "price_ac": price_ac,
+                    "price_dc": price_dc,
+                    "monthly_fee": tariff.fee_on(today),
+                    "reference_price_ac": tariff.reference_price_on("ac", today),
+                    "reference_price_dc": tariff.reference_price_on("dc", today),
                 }
             )
 

@@ -152,6 +152,17 @@ same file twice books nothing twice. Monthly fee rows are skipped, fees are
 booked automatically. Invalid rows are listed with their row number, all
 other rows are booked.
 
+**Tariff comparison "what if":** The scales button in the header of the
+tariff statistics recalculates your real sessions of a period with two
+tariffs you enter (AC price, DC price, monthly fee), e.g. to see whether a
+subscription with a monthly fee would pay off, or would have been cheaper
+on your holiday. Filter by vehicle and tariff; both tariffs can take the
+values of an existing tariff (or its reference prices "without
+subscription"). The monthly fee only counts for calendar months with at
+least one of the selected sessions. Sessions
+of a charge type without a price in a tariff count with their actual cost.
+Nothing is stored.
+
 You can also use the entities on your own dashboards. Every vehicle gets
 input entities to book a session:
 
