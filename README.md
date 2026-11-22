@@ -85,7 +85,9 @@ Assign to a vehicle:
   **Log** to type the kWh from the receipt, optionally followed by the cost
   (e.g. `12.4` or `12.4 7.32`); the session is booked right away with the
   preselected tariff. Tapping the notification itself opens the Charging
-  log page (built for Android; iOS may differ).
+  log page. Tested on Android. iOS is untested: if the notification, its
+  buttons or the reply don't work on your iPhone, please
+  [open an issue](https://github.com/marc-schieferdecker/ev_charge_log/issues).
 
 `unavailable`/`unknown` states are ignored, and a restart of Home Assistant
 does not count as a new charge.
