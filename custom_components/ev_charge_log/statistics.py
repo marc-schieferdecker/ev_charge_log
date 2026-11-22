@@ -36,7 +36,9 @@ from homeassistant.util import slugify
 from homeassistant.util.unit_conversion import EnergyConverter
 
 from .const import DOMAIN
-from .models import HourlyTotal
+from .reports import (
+    HourlyTotal,
+)
 
 KIND_ENERGY = "energy"
 KIND_COST = "cost"

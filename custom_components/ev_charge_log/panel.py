@@ -24,21 +24,27 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 from homeassistant.util.hass_dict import HassKey
 
-from .const import DOMAIN, PANEL_URL_PATH
-from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
-from .models import (
-    EXPORT_COLUMNS,
-    EXPORT_VALUES,
-    Session,
-    TariffMonthRow,
-    ValidationError,
+from .compare import (
     WhatIfResult,
     WhatIfTariff,
     compare_tariffs,
+)
+from .const import DOMAIN, PANEL_URL_PATH
+from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
+from .csv_io import (
+    EXPORT_COLUMNS,
+    EXPORT_VALUES,
     export_csv,
-    month_of,
-    month_totals,
     parse_import_csv,
+)
+from .models import (
+    Session,
+    ValidationError,
+    month_of,
+)
+from .reports import (
+    TariffMonthRow,
+    month_totals,
     tariff_month_stats,
 )
 

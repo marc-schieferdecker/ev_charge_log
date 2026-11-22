@@ -7,12 +7,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.ev_charge_log.compare import (
+    WhatIfTariff,
+    compare_tariffs,
+)
 from custom_components.ev_charge_log.models import (
     Fee,
     Session,
     ValidationError,
-    WhatIfTariff,
-    compare_tariffs,
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")

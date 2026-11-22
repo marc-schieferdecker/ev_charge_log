@@ -22,7 +22,12 @@ from homeassistant.helpers.event import async_track_state_change_event
 from .const import CONF_KIND, KIND_VEHICLES
 from .coordinator import EvChargeLogConfigEntry, EvChargeLogCoordinator
 from .entity import EvChargeLogEntity, tariff_device, vehicle_device
-from .models import Session, soc_metrics
+from .models import (
+    Session,
+)
+from .reports import (
+    soc_metrics,
+)
 
 # Unit placeholders, replaced with the HA currency at runtime.
 _CURRENCY = "{currency}"

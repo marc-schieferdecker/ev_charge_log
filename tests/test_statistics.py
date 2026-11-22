@@ -7,10 +7,12 @@ from zoneinfo import ZoneInfo
 
 from custom_components.ev_charge_log.models import (
     Fee,
-    HourlyTotal,
     Session,
-    hourly_statistics,
     summarize,
+)
+from custom_components.ev_charge_log.reports import (
+    HourlyTotal,
+    hourly_statistics,
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")

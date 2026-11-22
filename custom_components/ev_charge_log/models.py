@@ -5,12 +5,10 @@ This module must not import Home Assistant so it can be tested on its own.
 
 from __future__ import annotations
 
-import csv
-import io
 import re
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -71,12 +69,12 @@ def round_money(value: float) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def _require_non_negative(name: str, value: float | None) -> None:
+def require_non_negative(name: str, value: float | None) -> None:
     if value is not None and value < 0:
         raise ValidationError(f"{name} must not be negative", f"negative_{name}")
 
 
-def _optional_float(value: Any) -> float | None:
+def optional_float(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
@@ -130,7 +128,7 @@ class Vehicle:
         return cls(
             id=data["id"],
             name=data["name"],
-            battery_capacity_kwh=_optional_float(data.get("battery_capacity_kwh")),
+            battery_capacity_kwh=optional_float(data.get("battery_capacity_kwh")),
             default_tariff_id=data.get("default_tariff_id"),
             soc_entity_id=data.get("soc_entity_id"),
             charging_entity_id=data.get("charging_entity_id"),
@@ -138,18 +136,18 @@ class Vehicle:
             reminder_excluded_zones=tuple(data.get("reminder_excluded_zones") or ()),
             notify_services=tuple(data.get("notify_services") or ()),
             odometer_entity_id=data.get("odometer_entity_id"),
-            charging_loss_ac=_optional_float(data.get("charging_loss_ac")),
-            charging_loss_dc=_optional_float(data.get("charging_loss_dc")),
+            charging_loss_ac=optional_float(data.get("charging_loss_ac")),
+            charging_loss_dc=optional_float(data.get("charging_loss_dc")),
         )
 
 
-def _validate_prices(price_ac: float | None, price_dc: float | None) -> None:
+def validate_prices(price_ac: float | None, price_dc: float | None) -> None:
     if price_ac is None and price_dc is None:
         raise ValidationError(
             "a price version needs an AC or a DC price", "price_required"
         )
-    _require_non_negative("price_ac", price_ac)
-    _require_non_negative("price_dc", price_dc)
+    require_non_negative("price_ac", price_ac)
+    require_non_negative("price_dc", price_dc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,10 +166,10 @@ class PriceVersion:
 
     def __post_init__(self) -> None:
         """Validate the prices."""
-        _validate_prices(self.price_ac, self.price_dc)
-        _require_non_negative("monthly_fee", self.monthly_fee)
-        _require_non_negative("reference_price_ac", self.reference_price_ac)
-        _require_non_negative("reference_price_dc", self.reference_price_dc)
+        validate_prices(self.price_ac, self.price_dc)
+        require_non_negative("monthly_fee", self.monthly_fee)
+        require_non_negative("reference_price_ac", self.reference_price_ac)
+        require_non_negative("reference_price_dc", self.reference_price_dc)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for subentry data."""
@@ -189,11 +187,11 @@ class PriceVersion:
         """Load from subentry data."""
         return cls(
             valid_from=date.fromisoformat(data["valid_from"]),
-            price_ac=_optional_float(data.get("price_ac")),
-            price_dc=_optional_float(data.get("price_dc")),
-            monthly_fee=_optional_float(data.get("monthly_fee")),
-            reference_price_ac=_optional_float(data.get("reference_price_ac")),
-            reference_price_dc=_optional_float(data.get("reference_price_dc")),
+            price_ac=optional_float(data.get("price_ac")),
+            price_dc=optional_float(data.get("price_dc")),
+            monthly_fee=optional_float(data.get("monthly_fee")),
+            reference_price_ac=optional_float(data.get("reference_price_ac")),
+            reference_price_dc=optional_float(data.get("reference_price_dc")),
         )
 
 
@@ -202,7 +200,7 @@ def month_of(day: date) -> str:
     return f"{day.year:04d}-{day.month:02d}"
 
 
-def _months(first: date, last: date) -> list[date]:
+def month_starts(first: date, last: date) -> list[date]:
     """First days of all months from `first` to `last` (inclusive)."""
     months = []
     year, month = first.year, first.month
@@ -249,10 +247,10 @@ class Tariff:
 
     def __post_init__(self) -> None:
         """Validate the tariff and sort the versions by date."""
-        _validate_prices(self.price_ac, self.price_dc)
-        _require_non_negative("monthly_fee", self.monthly_fee)
-        _require_non_negative("reference_price_ac", self.reference_price_ac)
-        _require_non_negative("reference_price_dc", self.reference_price_dc)
+        validate_prices(self.price_ac, self.price_dc)
+        require_non_negative("monthly_fee", self.monthly_fee)
+        require_non_negative("reference_price_ac", self.reference_price_ac)
+        require_non_negative("reference_price_dc", self.reference_price_dc)
         if self.fee_start and self.fee_end and self.fee_end < self.fee_start:
             raise ValidationError("fee_end is before fee_start", "fee_end_before_start")
         days = [v.valid_from for v in self.versions]
@@ -337,7 +335,7 @@ class Tariff:
             return []
         last = min(today, self.fee_end) if self.fee_end else today
         due = []
-        for first in _months(self.fee_start, last):
+        for first in month_starts(self.fee_start, last):
             key = month_of(first)
             fee = self.fee_on(first)
             if key not in booked and fee is not None:
@@ -350,18 +348,18 @@ class Tariff:
         return cls(
             id=data["id"],
             name=data["name"],
-            price_ac=_optional_float(data.get("price_ac")),
-            price_dc=_optional_float(data.get("price_dc")),
+            price_ac=optional_float(data.get("price_ac")),
+            price_dc=optional_float(data.get("price_dc")),
             zones=tuple(data.get("zones") or ()),
             versions=tuple(
                 PriceVersion.from_dict(v) for v in data.get("versions") or ()
             ),
-            monthly_fee=_optional_float(data.get("monthly_fee")),
+            monthly_fee=optional_float(data.get("monthly_fee")),
             fee_vehicle_id=data.get("fee_vehicle_id"),
             fee_start=_optional_date(data.get("fee_start")),
             fee_end=_optional_date(data.get("fee_end")),
-            reference_price_ac=_optional_float(data.get("reference_price_ac")),
-            reference_price_dc=_optional_float(data.get("reference_price_dc")),
+            reference_price_ac=optional_float(data.get("reference_price_ac")),
+            reference_price_dc=optional_float(data.get("reference_price_dc")),
         )
 
 
@@ -381,7 +379,7 @@ class Fee:
     def __post_init__(self) -> None:
         """Normalize and validate."""
         object.__setattr__(self, "amount", float(self.amount))
-        _require_non_negative("amount", self.amount)
+        require_non_negative("amount", self.amount)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for storage."""
@@ -443,8 +441,8 @@ class Session:
             raise ValidationError(
                 f"invalid source: {self.source}", "source", source=self.source
             )
-        _require_non_negative("cost", self.cost)
-        _require_non_negative("price_per_kwh", self.price_per_kwh)
+        require_non_negative("cost", self.cost)
+        require_non_negative("price_per_kwh", self.price_per_kwh)
         for name in ("soc_start", "soc_end"):
             value = getattr(self, name)
             if value is not None and not 0 <= value <= 100:
@@ -481,11 +479,11 @@ class Session:
             energy_kwh=float(data["energy_kwh"]),
             tariff_id=data.get("tariff_id"),
             charge_type=data["charge_type"],
-            price_per_kwh=_optional_float(data.get("price_per_kwh")),
+            price_per_kwh=optional_float(data.get("price_per_kwh")),
             cost=float(data["cost"]),
             cost_overridden=bool(data["cost_overridden"]),
-            soc_start=_optional_float(data.get("soc_start")),
-            soc_end=_optional_float(data.get("soc_end")),
+            soc_start=optional_float(data.get("soc_start")),
+            soc_end=optional_float(data.get("soc_end")),
             location=data.get("location"),
             note=data.get("note"),
             source=data.get("source", SOURCE_MANUAL),
@@ -524,7 +522,7 @@ def calculate_cost(
         )
     if energy_kwh <= 0:
         raise ValidationError("energy_kwh must be positive", "energy")
-    _require_non_negative("cost", cost)
+    require_non_negative("cost", cost)
 
     price = tariff.price_for(charge_type, day) if tariff is not None else None
 
@@ -566,323 +564,6 @@ def summarize(sessions: Iterable[Session], fees: Iterable[Fee] = ()) -> Summary:
         count += 1
     fee_total = sum((Decimal(str(fee.amount)) for fee in fees), Decimal(0))
     return Summary(float(cost + fee_total), float(energy), count, float(fee_total))
-
-
-@dataclass(frozen=True, slots=True)
-class DailyTotals:
-    """Energy and session cost per day (fees are not included)."""
-
-    days: list[date]
-    energy_kwh: list[float]
-    cost: list[float]
-
-    @property
-    def total_energy_kwh(self) -> float:
-        """Sum over all days."""
-        return float(sum(Decimal(str(v)) for v in self.energy_kwh))
-
-    @property
-    def total_cost(self) -> float:
-        """Sum over all days."""
-        return float(sum(Decimal(str(v)) for v in self.cost))
-
-
-def daily_totals(
-    sessions: Iterable[Session],
-    last_day: date,
-    days: int,
-    day_of: Callable[[Session], date],
-) -> DailyTotals:
-    """Totals per day for `days` days up to `last_day` (inclusive).
-
-    `day_of` gives the (local) day of a session. Monthly fees are not part
-    of this: they belong to a month, not to a charging day.
-    """
-    first_day = last_day - timedelta(days=days - 1)
-    span = [first_day + timedelta(days=i) for i in range(days)]
-    energy = {day: Decimal(0) for day in span}
-    cost = {day: Decimal(0) for day in span}
-    for session in sessions:
-        day = day_of(session)
-        if day in energy:
-            energy[day] += Decimal(str(session.energy_kwh))
-            cost[day] += Decimal(str(session.cost))
-    return DailyTotals(
-        days=span,
-        energy_kwh=[float(energy[d]) for d in span],
-        cost=[float(cost[d]) for d in span],
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class OdometerBaseline:
-    """Odometer reading from which on cost per distance is calculated."""
-
-    entity_id: str
-    start: float  # odometer reading in the HA length unit
-    since: datetime
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize for storage."""
-        return {
-            "entity_id": self.entity_id,
-            "start": self.start,
-            "since": self.since.isoformat(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> OdometerBaseline:
-        """Load from storage."""
-        return cls(
-            entity_id=data["entity_id"],
-            start=float(data["start"]),
-            since=datetime.fromisoformat(data["since"]),
-        )
-
-
-MIN_DISTANCE: float = 1.0
-
-
-def cost_per_100(
-    sessions: Iterable[Session], baseline: OdometerBaseline, odometer: float
-) -> float | None:
-    """Session cost per 100 distance units since the baseline.
-
-    Counts the cost of sessions at or after `baseline.since` (monthly fees
-    are not included). None until at least MIN_DISTANCE was driven.
-    """
-    distance = odometer - baseline.start
-    if distance < MIN_DISTANCE:
-        return None
-    cost = sum(
-        (Decimal(str(s.cost)) for s in sessions if s.timestamp >= baseline.since),
-        Decimal(0),
-    )
-    return round(float(cost) / distance * 100, 2)
-
-
-def energy_per_100(
-    sessions: Iterable[Session], baseline: OdometerBaseline, odometer: float
-) -> float | None:
-    """Charged energy (kWh) per 100 distance units since the baseline.
-
-    Same basis as `cost_per_100`: sessions at or after `baseline.since`,
-    None until at least MIN_DISTANCE was driven.
-    """
-    distance = odometer - baseline.start
-    if distance < MIN_DISTANCE:
-        return None
-    energy = sum(
-        (Decimal(str(s.energy_kwh)) for s in sessions if s.timestamp >= baseline.since),
-        Decimal(0),
-    )
-    return round(float(energy) / distance * 100, 2)
-
-
-@dataclass(frozen=True, slots=True)
-class HourlyTotal:
-    """Running totals of a vehicle at the end of an hour (stage 5).
-
-    `start` is the beginning of the hour in UTC. Only hours in which a
-    session or a monthly fee counts have a row.
-    """
-
-    start: datetime
-    energy_kwh: float
-    cost: float
-
-
-def _hour_start(moment: datetime) -> datetime:
-    return moment.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
-
-
-def hourly_statistics(
-    sessions: Iterable[Session],
-    fees: Iterable[Fee],
-    vehicle_id: str,
-    tz: tzinfo,
-) -> list[HourlyTotal]:
-    """Running energy and cost totals of a vehicle, per hour of the charge.
-
-    A session counts in the hour of its timestamp, not when it was booked.
-    A monthly fee counts on the first of its month at 00:00 in `tz` (local
-    time of HA). The cost includes the fees, so the last row equals the
-    vehicle's total cost and total energy.
-    """
-    energy: dict[datetime, Decimal] = {}
-    cost: dict[datetime, Decimal] = {}
-
-    def add(moment: datetime, kwh: Decimal, amount: Decimal) -> None:
-        hour = _hour_start(moment)
-        energy[hour] = energy.get(hour, Decimal(0)) + kwh
-        cost[hour] = cost.get(hour, Decimal(0)) + amount
-
-    for session in sessions:
-        if session.vehicle_id == vehicle_id:
-            add(
-                session.timestamp,
-                Decimal(str(session.energy_kwh)),
-                Decimal(str(session.cost)),
-            )
-    for fee in fees:
-        if fee.vehicle_id == vehicle_id:
-            year, month = (int(part) for part in fee.month.split("-"))
-            add(
-                datetime(year, month, 1, tzinfo=tz),
-                Decimal(0),
-                Decimal(str(fee.amount)),
-            )
-
-    rows: list[HourlyTotal] = []
-    energy_sum = Decimal(0)
-    cost_sum = Decimal(0)
-    for hour in sorted(energy):
-        energy_sum += energy[hour]
-        cost_sum += cost[hour]
-        rows.append(HourlyTotal(hour, float(energy_sum), float(cost_sum)))
-    return rows
-
-
-def month_totals(
-    sessions: Iterable[Session], month: str, day_of: Callable[[Session], date]
-) -> DailyTotals:
-    """Totals per day for all days of a calendar month ("YYYY-MM")."""
-    year, number = (int(part) for part in month.split("-"))
-    following = date(year + 1, 1, 1) if number == 12 else date(year, number + 1, 1)
-    last = following - timedelta(days=1)
-    return daily_totals(sessions, last, last.day, day_of)
-
-
-@dataclass(frozen=True, slots=True)
-class TariffMonthRow:
-    """One row of the tariff statistics of a month.
-
-    `tariff_id` None is the row "without tariff" (sessions without a tariff
-    or of a deleted tariff, plus fees of deleted tariffs). `fee` is None
-    without a booked fee, `saving` is None if there is nothing to show.
-    """
-
-    tariff_id: str | None
-    name: str | None
-    session_count: int
-    energy_kwh: float
-    cost: float
-    fee: float | None
-    saving: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class TariffMonthStats:
-    """Tariff rows (sorted by name, "without tariff" last) and the total."""
-
-    rows: list[TariffMonthRow]
-    total: TariffMonthRow
-
-
-def _sum_or_none(values: Iterable[Decimal]) -> Decimal | None:
-    values = list(values)
-    return sum(values, Decimal(0)) if values else None
-
-
-def tariff_month_stats(
-    sessions: Iterable[Session],
-    fees: Iterable[Fee],
-    tariffs: Mapping[str, Tariff],
-    month: str,
-    day_of: Callable[[Session], date],
-) -> TariffMonthStats:
-    """Sessions, energy, cost, fee and savings per tariff in a month ("YYYY-MM").
-
-    Rows: every existing tariff with sessions or a booked fee in the month.
-    Savings only for tariffs with a booked fee in the month:
-    sum(energy x reference price - stored cost) - fee. The reference price is
-    the one valid on the session's day; sessions without a reference price
-    for their charge type count as 0. The result may be negative.
-    """
-    groups: dict[str | None, list[Session]] = {}
-    for session in sessions:
-        if month_of(day_of(session)) != month:
-            continue
-        key = session.tariff_id if session.tariff_id in tariffs else None
-        groups.setdefault(key, []).append(session)
-    group_fees: dict[str | None, list[Decimal]] = {}
-    for fee in fees:
-        if fee.month != month:
-            continue
-        key = fee.tariff_id if fee.tariff_id in tariffs else None
-        group_fees.setdefault(key, []).append(Decimal(str(fee.amount)))
-
-    def row(tariff_id: str | None) -> TariffMonthRow:
-        tariff = tariffs.get(tariff_id) if tariff_id else None
-        group = groups.get(tariff_id, [])
-        fee = _sum_or_none(group_fees.get(tariff_id, []))
-        saving = None
-        if tariff is not None and fee is not None:
-            saving = -fee
-            for session in group:
-                reference = tariff.reference_price_on(
-                    session.charge_type, day_of(session)
-                )
-                if reference is not None:
-                    saving += Decimal(str(session.energy_kwh)) * Decimal(
-                        str(reference)
-                    ) - Decimal(str(session.cost))
-        return TariffMonthRow(
-            tariff_id=tariff_id,
-            name=tariff.name if tariff else None,
-            session_count=len(group),
-            energy_kwh=float(
-                sum((Decimal(str(s.energy_kwh)) for s in group), Decimal(0))
-            ),
-            cost=float(sum((Decimal(str(s.cost)) for s in group), Decimal(0))),
-            fee=None if fee is None else float(fee),
-            saving=None if saving is None else round_money(float(saving)),
-        )
-
-    ids = {key for key in (*groups, *group_fees) if key is not None}
-    rows = [row(tariff_id) for tariff_id in ids]
-    rows.sort(key=lambda r: ((r.name or "").casefold(), r.tariff_id or ""))
-    if None in groups or None in group_fees:
-        rows.append(row(None))
-
-    fee_total = _sum_or_none(Decimal(str(r.fee)) for r in rows if r.fee is not None)
-    saving_total = _sum_or_none(
-        Decimal(str(r.saving)) for r in rows if r.saving is not None
-    )
-    total = TariffMonthRow(
-        tariff_id=None,
-        name=None,
-        session_count=sum(r.session_count for r in rows),
-        energy_kwh=float(sum((Decimal(str(r.energy_kwh)) for r in rows), Decimal(0))),
-        cost=float(sum((Decimal(str(r.cost)) for r in rows), Decimal(0))),
-        fee=None if fee_total is None else float(fee_total),
-        saving=None if saving_total is None else float(saving_total),
-    )
-    return TariffMonthStats(rows, total)
-
-
-@dataclass(frozen=True, slots=True)
-class SocMetrics:
-    """Display-only values derived from SoC."""
-
-    soc_points: float
-    charging_loss_percent: float | None
-    cost_per_soc_point: float | None
-
-
-def soc_metrics(
-    session: Session, battery_capacity_kwh: float | None
-) -> SocMetrics | None:
-    """Return SoC-based display values, or None if SoC data is missing."""
-    if session.soc_start is None or session.soc_end is None:
-        return None
-    points = session.soc_end - session.soc_start
-    loss = None
-    if battery_capacity_kwh:
-        stored_kwh = points / 100 * battery_capacity_kwh
-        loss = round((session.energy_kwh - stored_kwh) / session.energy_kwh * 100, 1)
-    cost_per_point = round(session.cost / points, 4) if points > 0 else None
-    return SocMetrics(points, loss, cost_per_point)
 
 
 def energy_from_soc(
@@ -970,572 +651,4 @@ def build_session(
         location=data.location,
         note=data.note,
         source=data.source,
-    )
-
-
-# --- CSV export (stage 6) ---------------------------------------------------
-
-# Column keys of the export, in this order; the header texts come from the
-# translations ("panel_export_col_<key>").
-EXPORT_COLUMNS = (
-    "type",
-    "date",
-    "time",
-    "energy",
-    "charge_type",
-    "tariff",
-    "price",
-    "cost",
-    "cost_overridden",
-    "soc_start",
-    "soc_end",
-    "location",
-    "note",
-    "source",
-)
-# Value texts of the export ("panel_export_<key>").
-EXPORT_VALUES = (
-    "type_session",
-    "type_fee",
-    "yes",
-    "no",
-    "source_manual",
-    "source_reminder",
-)
-# Excel runs cells starting with these as formulas.
-_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _csv_text(value: str | None) -> str:
-    """Free text for a CSV cell; formulas are defused with a leading quote."""
-    if not value:
-        return ""
-    return f"'{value}" if value.startswith(_FORMULA_START) else value
-
-
-def _csv_number(value: float | None, decimal: str) -> str:
-    """A number without thousands separator; None is an empty cell, 0 is "0"."""
-    if value is None:
-        return ""
-    text = f"{value:.6f}".rstrip("0").rstrip(".")
-    return text.replace(".", decimal)
-
-
-def _csv_money(value: float, decimal: str) -> str:
-    return f"{round_money(value):.2f}".replace(".", decimal)
-
-
-def export_csv(
-    sessions: Iterable[Session],
-    fees: Iterable[Fee],
-    tariff_names: Mapping[str, str],
-    start: date | None,
-    end: date | None,
-    to_local: Callable[[datetime], datetime],
-    texts: Mapping[str, str],
-    decimal: str = ".",
-) -> str:
-    """Sessions and booked monthly fees as CSV for Excel, oldest first.
-
-    A session counts on its local day, a fee on the first of its month;
-    `start` and `end` are inclusive, None is open. `texts` holds the header
-    texts (`EXPORT_COLUMNS`) and value texts (`EXPORT_VALUES`). With a decimal
-    comma the separator is ";", else ",". Starts with a BOM so Excel reads
-    UTF-8. Tariffs not in `tariff_names` (deleted) give an empty name.
-    """
-    if start is not None and end is not None and start > end:
-        raise ValidationError("start of the export is after its end", "export_range")
-
-    def inside(day: date) -> bool:
-        return (start is None or day >= start) and (end is None or day <= end)
-
-    def tariff_name(tariff_id: str | None) -> str:
-        return _csv_text(tariff_names.get(tariff_id, "")) if tariff_id else ""
-
-    rows: list[tuple[tuple[date, int, str], list[str]]] = []
-    for fee in fees:
-        day = date.fromisoformat(f"{fee.month}-01")
-        if not inside(day):
-            continue
-        row = dict.fromkeys(EXPORT_COLUMNS, "")
-        row["type"] = texts["type_fee"]
-        row["date"] = day.isoformat()
-        row["tariff"] = tariff_name(fee.tariff_id)
-        row["cost"] = _csv_money(fee.amount, decimal)
-        # A fee counts at 00:00 on the first, before sessions of that day.
-        rows.append(((day, 0, ""), list(row.values())))
-    for session in sessions:
-        local = to_local(session.timestamp)
-        day = local.date()
-        if not inside(day):
-            continue
-        clock = local.strftime("%H:%M")
-        rows.append(
-            (
-                (day, 1, local.strftime("%H:%M:%S.%f")),
-                [
-                    texts["type_session"],
-                    day.isoformat(),
-                    clock,
-                    _csv_number(session.energy_kwh, decimal),
-                    session.charge_type.upper(),
-                    tariff_name(session.tariff_id),
-                    _csv_number(session.price_per_kwh, decimal),
-                    _csv_money(session.cost, decimal),
-                    texts["yes"] if session.cost_overridden else texts["no"],
-                    _csv_number(session.soc_start, decimal),
-                    _csv_number(session.soc_end, decimal),
-                    _csv_text(session.location),
-                    _csv_text(session.note),
-                    texts[f"source_{session.source}"],
-                ],
-            )
-        )
-    # Stable sort keeps the booking order of sessions at the same time.
-    rows.sort(key=lambda item: item[0])
-
-    buffer = io.StringIO()
-    writer = csv.writer(
-        buffer, delimiter=";" if decimal == "," else ",", lineterminator="\r\n"
-    )
-    writer.writerow([texts[key] for key in EXPORT_COLUMNS])
-    writer.writerows(cells for _, cells in rows)
-    return "﻿" + buffer.getvalue()
-
-
-# --- CSV import (stage 7) ---------------------------------------------------
-
-# Limits of one import file (characters and data rows).
-IMPORT_MAX_CHARS = 1_000_000
-IMPORT_MAX_ROWS = 5000
-# Columns an import file needs; the energy may come from the SoC instead.
-_IMPORT_REQUIRED = ("date", "charge_type")
-_IMPORT_ENERGY = ("energy", "soc_start", "soc_end")
-# Time of a row without a time.
-_IMPORT_NOON = time(12, 0)
-_BRACKETS = re.compile(r"\s*\([^)]*\)\s*$")
-_IMPORT_NUMBER = re.compile(r"^-?\d+(?:\.\d+)?$")
-_IMPORT_DATE_DOTTED = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$")
-_IMPORT_TIME = re.compile(r"^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$")
-
-
-@dataclass(frozen=True, slots=True)
-class ImportRow:
-    """One session row of an import file, parsed but not booked.
-
-    `row` is the row number as a spreadsheet shows it (header = 1).
-    `timestamp` is aware, in the time zone of the import.
-    """
-
-    row: int
-    timestamp: datetime
-    energy_kwh: float | None
-    charge_type: str
-    tariff_name: str | None = None
-    price_per_kwh: float | None = None
-    cost: float | None = None
-    cost_overridden: bool | None = None
-    soc_start: float | None = None
-    soc_end: float | None = None
-    location: str | None = None
-    note: str | None = None
-    source: str = SOURCE_MANUAL
-
-
-@dataclass(frozen=True, slots=True)
-class ImportProblem:
-    """A row that was not imported, with the translation key of the reason."""
-
-    row: int
-    key: str
-    placeholders: dict[str, str]
-
-
-@dataclass(slots=True)
-class ParsedImport:
-    """Result of reading an import file."""
-
-    rows: list[ImportRow]
-    fees_skipped: int = 0
-    problems: list[ImportProblem] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class ImportResult:
-    """Result of booking the rows of an import file."""
-
-    sessions: list[Session]
-    duplicates: int = 0
-    problems: list[ImportProblem] = field(default_factory=list)
-
-
-def _header_key(text: str) -> str:
-    """Header text without unit in brackets, for comparing ("Kosten (EUR)")."""
-    return _BRACKETS.sub("", text.strip()).strip().casefold()
-
-
-def _import_text(value: str) -> str | None:
-    """Free text of a cell; the export's formula protection is removed."""
-    value = value.strip()
-    if value.startswith("'") and value[1:2] and value[1] in "=+-@\t\r":
-        value = value[1:]
-    return value or None
-
-
-def _import_value_error(column: str, value: str) -> ValidationError:
-    return ValidationError(
-        f"invalid value {value!r} in column {column}",
-        "import_value",
-        column=column,
-        value=value,
-    )
-
-
-def _import_number(value: str, column: str, comma: bool) -> float | None:
-    text = value.strip()
-    if not text:
-        return None
-    if comma:
-        text = text.replace(",", ".")
-    if not _IMPORT_NUMBER.match(text):
-        raise _import_value_error(column, value)
-    return float(text)
-
-
-def _import_date(value: str, column: str) -> date:
-    text = value.strip()
-    dotted = _IMPORT_DATE_DOTTED.match(text)
-    try:
-        if dotted:
-            day, month, year = (int(part) for part in dotted.groups())
-            return date(year, month, day)
-        return date.fromisoformat(text)
-    except ValueError:
-        raise _import_value_error(column, value) from None
-
-
-def _import_time(value: str, column: str) -> time:
-    text = value.strip()
-    if not text:
-        return _IMPORT_NOON
-    match = _IMPORT_TIME.match(text)
-    try:
-        if match is None:
-            raise ValueError
-        return time(int(match[1]), int(match[2]))
-    except ValueError:
-        raise _import_value_error(column, value) from None
-
-
-def parse_import_csv(
-    text: str, texts: Iterable[Mapping[str, str]], tz: tzinfo
-) -> ParsedImport:
-    """Read a CSV file in the format of `export_csv` (any of its languages).
-
-    `texts` holds the header and value texts of each language, like the
-    `texts` of `export_csv`. Columns are found by their header text (without
-    the unit in brackets, case-insensitive) or their key, in any order;
-    unknown columns are ignored. With ";" as separator a decimal comma is
-    allowed. Dates as ISO or "D.M.YYYY", a missing time is 12:00 in `tz`.
-    Monthly fee rows are skipped (fees are booked automatically). A broken
-    file raises `ValidationError`; broken rows become problems.
-    """
-    if len(text) > IMPORT_MAX_CHARS:
-        raise ValidationError("the import file is too large", "import_too_large")
-    text = text.removeprefix("﻿")
-    first_line = text.split("\n", 1)[0]
-    delimiter = ";" if first_line.count(";") >= first_line.count(",") else ","
-    comma = delimiter == ";"
-    records = list(csv.reader(io.StringIO(text), delimiter=delimiter))
-    if len(records) - 1 > IMPORT_MAX_ROWS:
-        raise ValidationError("the import file is too large", "import_too_large")
-
-    texts = list(texts)
-    names: dict[str, str] = {}
-    for language in texts:
-        for key in EXPORT_COLUMNS:
-            names.setdefault(_header_key(language.get(key, key)), key)
-    for key in EXPORT_COLUMNS:
-        names.setdefault(key, key)
-        names.setdefault(key.replace("_", " "), key)
-
-    header = records[0] if records else []
-    columns: dict[str, int] = {}
-    captions: dict[str, str] = {}
-    for index, caption in enumerate(header):
-        key = names.get(_header_key(caption.removeprefix("﻿")))
-        if key is not None and key not in columns:
-            columns[key] = index
-            captions[key] = caption.strip()
-    if not all(key in columns for key in _IMPORT_REQUIRED) or not (
-        "energy" in columns or {"soc_start", "soc_end"} <= columns.keys()
-    ):
-        raise ValidationError(
-            "the import file has no date, charge type or energy column",
-            "import_header",
-        )
-
-    def values(*keys: str) -> set[str]:
-        return {
-            language[key].strip().casefold()
-            for language in texts
-            for key in keys
-            if language.get(key)
-        }
-
-    fee_texts = values("type_fee")
-    yes_texts = values("yes") | {"yes", "true", "1"}
-    no_texts = values("no") | {"no", "false", "0"}
-    sources = {SOURCE_MANUAL: SOURCE_MANUAL, "reminder": "reminder"}
-    for name in SOURCES:
-        sources |= dict.fromkeys(values(f"source_{name}"), name)
-
-    result = ParsedImport(rows=[])
-    for number, record in enumerate(records[1:], start=2):
-        if not any(cell.strip() for cell in record):
-            continue
-
-        def cell(key: str, record: list[str] = record) -> str:
-            index = columns.get(key)
-            return record[index] if index is not None and index < len(record) else ""
-
-        if cell("type").strip().casefold() in fee_texts:
-            result.fees_skipped += 1
-            continue
-        try:
-            numbers = {
-                key: _import_number(cell(key), captions.get(key, key), comma)
-                for key in ("energy", "price", "cost", "soc_start", "soc_end")
-            }
-            day = _import_date(cell("date"), captions["date"])
-            moment = _import_time(cell("time"), captions.get("time", "time"))
-            charge_type = cell("charge_type").strip().lower()
-            if charge_type not in CHARGE_TYPES:
-                raise ValidationError(
-                    f"invalid charge_type: {charge_type}",
-                    "charge_type",
-                    charge_type=cell("charge_type").strip(),
-                )
-            overridden_text = cell("cost_overridden").strip().casefold()
-            if not overridden_text:
-                overridden = None
-            elif overridden_text in yes_texts:
-                overridden = True
-            elif overridden_text in no_texts:
-                overridden = False
-            else:
-                raise _import_value_error(
-                    captions["cost_overridden"], cell("cost_overridden")
-                )
-        except ValidationError as err:
-            result.problems.append(ImportProblem(number, err.key, err.placeholders))
-            continue
-        result.rows.append(
-            ImportRow(
-                row=number,
-                timestamp=datetime.combine(day, moment, tzinfo=tz),
-                energy_kwh=numbers["energy"],
-                charge_type=charge_type,
-                tariff_name=_import_text(cell("tariff")),
-                price_per_kwh=numbers["price"],
-                cost=numbers["cost"],
-                cost_overridden=overridden,
-                soc_start=numbers["soc_start"],
-                soc_end=numbers["soc_end"],
-                location=_import_text(cell("location")),
-                note=_import_text(cell("note")),
-                source=sources.get(cell("source").strip().casefold(), SOURCE_MANUAL),
-            )
-        )
-    return result
-
-
-def duplicate_key(timestamp: datetime, energy_kwh: float) -> tuple[str, float]:
-    """Sessions with the same local minute and energy count as the same."""
-    return timestamp.strftime("%Y-%m-%dT%H:%M"), round(energy_kwh, 2)
-
-
-def build_imported_session(
-    session_id: str,
-    vehicle: Vehicle,
-    row: ImportRow,
-    tariff: Tariff | None,
-) -> Session:
-    """Book an imported row: the cost of the file is the snapshot.
-
-    Without cost in the row, it is calculated from the tariff like a
-    booking. A tariff without a price for the charge type rejects the row,
-    also with a cost. Without energy, it comes from the row's SoC, the
-    battery capacity and the charging loss (`energy_from_soc`).
-    """
-    energy = row.energy_kwh
-    if energy is None:
-        energy = energy_from_soc(
-            row.soc_start,
-            row.soc_end,
-            vehicle.battery_capacity_kwh,
-            vehicle.charging_loss(row.charge_type),
-        )
-    day = row.timestamp.date()
-    result = calculate_cost(energy, row.charge_type, tariff, row.cost, day)
-    if row.cost is None:
-        price, overridden = result.price_per_kwh, False
-    else:
-        price = row.price_per_kwh
-        overridden = True if row.cost_overridden is None else row.cost_overridden
-    return Session(
-        id=session_id,
-        vehicle_id=vehicle.id,
-        timestamp=row.timestamp,
-        energy_kwh=energy,
-        tariff_id=tariff.id if tariff is not None else None,
-        charge_type=row.charge_type,
-        price_per_kwh=price,
-        cost=result.cost,
-        cost_overridden=overridden,
-        soc_start=row.soc_start,
-        soc_end=row.soc_end,
-        location=row.location,
-        note=row.note,
-        source=row.source,
-    )
-
-
-# --- Tariff comparison "what if" (stage 8) ----------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class WhatIfTariff:
-    """A tariff entered for the comparison: prices and a monthly fee.
-
-    At least one price; None is "no price" / "no fee", 0 is valid.
-    """
-
-    price_ac: float | None = None
-    price_dc: float | None = None
-    monthly_fee: float | None = None
-
-    def __post_init__(self) -> None:
-        """Validate like a tariff."""
-        _validate_prices(self.price_ac, self.price_dc)
-        _require_non_negative("monthly_fee", self.monthly_fee)
-
-    def price(self, charge_type: str) -> float | None:
-        """Price per kWh of a charge type; None without one."""
-        return self.price_dc if charge_type == CHARGE_TYPE_DC else self.price_ac
-
-
-@dataclass(frozen=True, slots=True)
-class WhatIfResult:
-    """Costs of the selected sessions with one entered tariff.
-
-    `missing_count`: sessions of a charge type without price in the tariff;
-    they count with their stored cost. `average` is None without energy.
-    """
-
-    cost: float
-    fees: float
-    total: float
-    average: float | None
-    missing_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class TariffComparison:
-    """Comparison of two entered tariffs over the selected sessions.
-
-    `months` counts the calendar months with selected sessions (the months
-    the entered monthly fees are charged for). `difference` is B - A
-    (negative: B is cheaper). `actual_*` is what was really paid: stored
-    costs and the booked fees of all months of the period in the selection.
-    """
-
-    months: int
-    session_count: int
-    energy_kwh: float
-    a: WhatIfResult
-    b: WhatIfResult
-    difference: float
-    actual_cost: float
-    actual_fees: float
-    actual_total: float
-
-
-def compare_tariffs(
-    sessions: Iterable[Session],
-    fees: Iterable[Fee],
-    start: date,
-    end: date,
-    day_of: Callable[[Session], date],
-    a: WhatIfTariff,
-    b: WhatIfTariff,
-    vehicle_id: str | None = None,
-    tariff_id: str | None = None,
-) -> TariffComparison:
-    """Recalculate the sessions of a period with two entered tariffs.
-
-    Sessions count on their local day, `start` and `end` inclusive, filtered
-    by vehicle and tariff (None: all). Per session energy x price of its
-    charge type; without a price the stored cost. The monthly fee counts
-    only for calendar months with at least one selected session: a month
-    without charging would not need the subscription. Nothing is stored:
-    stored sessions stay unchanged.
-    """
-    if start > end:
-        raise ValidationError(
-            "start of the comparison is after its end", "compare_range"
-        )
-    months = {month_of(first) for first in _months(start, end)}
-    selected = [
-        s
-        for s in sessions
-        if start <= day_of(s) <= end
-        and (vehicle_id is None or s.vehicle_id == vehicle_id)
-        and (tariff_id is None or s.tariff_id == tariff_id)
-    ]
-    fee_months = {month_of(day_of(s)) for s in selected}
-    energy = sum((Decimal(str(s.energy_kwh)) for s in selected), Decimal(0))
-    actual_cost = sum((Decimal(str(s.cost)) for s in selected), Decimal(0))
-    actual_fees = sum(
-        (
-            Decimal(str(f.amount))
-            for f in fees
-            if f.month in months
-            and (vehicle_id is None or f.vehicle_id == vehicle_id)
-            and (tariff_id is None or f.tariff_id == tariff_id)
-        ),
-        Decimal(0),
-    )
-
-    def result(tariff: WhatIfTariff) -> WhatIfResult:
-        cost = Decimal(0)
-        missing = 0
-        for session in selected:
-            price = tariff.price(session.charge_type)
-            if price is None:
-                cost += Decimal(str(session.cost))
-                missing += 1
-            else:
-                cost += Decimal(str(session.energy_kwh)) * Decimal(str(price))
-        fee = Decimal(str(tariff.monthly_fee or 0)) * len(fee_months)
-        total = cost + fee
-        return WhatIfResult(
-            cost=round_money(float(cost)),
-            fees=round_money(float(fee)),
-            total=round_money(float(total)),
-            average=round(float(total / energy), 4) if energy > 0 else None,
-            missing_count=missing,
-        )
-
-    result_a, result_b = result(a), result(b)
-    return TariffComparison(
-        months=len(fee_months),
-        session_count=len(selected),
-        energy_kwh=float(energy),
-        a=result_a,
-        b=result_b,
-        difference=round_money(result_b.total - result_a.total),
-        actual_cost=round_money(float(actual_cost)),
-        actual_fees=round_money(float(actual_fees)),
-        actual_total=round_money(float(actual_cost + actual_fees)),
     )

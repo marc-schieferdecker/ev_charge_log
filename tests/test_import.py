@@ -8,6 +8,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.ev_charge_log.csv_io import (
+    export_csv,
+    parse_import_csv,
+)
 from custom_components.ev_charge_log.models import (
     Fee,
     PriceVersion,
@@ -15,8 +19,6 @@ from custom_components.ev_charge_log.models import (
     Tariff,
     ValidationError,
     Vehicle,
-    export_csv,
-    parse_import_csv,
 )
 from custom_components.ev_charge_log.storage import SessionLog
 

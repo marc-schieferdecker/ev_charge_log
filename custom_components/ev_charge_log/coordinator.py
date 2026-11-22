@@ -4,8 +4,10 @@ There is one coordinator per Home Assistant instance, shared by the two
 config entries ("vehicles" and "tariffs"). Each entry registers its
 subentries here on setup and removes them on unload.
 
-All calculation lives in models.py / storage.py. This module only wires
-them to Home Assistant (storage, config subentries, entity updates).
+All calculation lives in the modules without Home Assistant (models.py,
+reports.py, storage.py, detection.py). This module only wires them to Home
+Assistant (storage, config subentries, entity updates). The reminder after a
+charge is in reminder.py, reading the vehicle's entities in vehicle_state.py.
 """
 
 from __future__ import annotations
@@ -17,9 +19,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any
 
-from homeassistant.components import frontend, persistent_notification
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import (
     CALLBACK_TYPE,
     Event,
@@ -27,7 +27,6 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import (
     async_call_later,
@@ -35,10 +34,8 @@ from homeassistant.helpers.event import (
     async_track_time_change,
 )
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 from homeassistant.util.hass_dict import HassKey
-from homeassistant.util.unit_conversion import DistanceConverter
 
 from .const import (
     CHARGE_TYPE_AC,
@@ -46,13 +43,15 @@ from .const import (
     DOMAIN,
     EVENT_CHARGING_FINISHED,
     EVENT_MOBILE_APP_ACTION,
-    PANEL_URL_PATH,
     PUSH_ACTION_PREFIX,
     SOURCE_REMINDER,
     STATISTICS_DELAY,
     SUBENTRY_TYPE_TARIFF,
     SUBENTRY_TYPE_VEHICLE,
-    ZONE_HOME,
+)
+from .csv_io import (
+    ImportResult,
+    ImportRow,
 )
 from .detection import (
     DetectionState,
@@ -62,20 +61,26 @@ from .detection import (
     on_charging_state,
 )
 from .models import (
-    ImportResult,
-    ImportRow,
-    OdometerBaseline,
     Session,
     SessionInput,
     Tariff,
     ValidationError,
     Vehicle,
-    cost_per_100,
-    energy_per_100,
-    hourly_statistics,
     parse_reply,
 )
 from .models import energy_from_soc as calculate_energy_from_soc
+from .reminder import (
+    async_dismiss_reminder,
+    async_push,
+    async_show_reminder,
+    async_text,
+)
+from .reports import (
+    OdometerBaseline,
+    cost_per_100,
+    energy_per_100,
+    hourly_statistics,
+)
 from .statistics import (
     KIND_COST,
     KIND_ENERGY,
@@ -85,6 +90,7 @@ from .statistics import (
     statistic_ids,
 )
 from .storage import STORAGE_MINOR_VERSION, STORAGE_VERSION, SessionLog, migrate
+from .vehicle_state import read_odometer, read_soc, read_zone
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -243,29 +249,12 @@ class EvChargeLogCoordinator:
 
     # --- cost per 100 km (display value) ------------------------------------
 
-    def odometer_reading(self, vehicle: Vehicle) -> float | None:
-        """Current odometer in the HA length unit; None if not available."""
-        if not vehicle.odometer_entity_id:
-            return None
-        state = self.hass.states.get(vehicle.odometer_entity_id)
-        if state is None:
-            return None
-        try:
-            value = float(state.state)
-        except ValueError:
-            return None
-        unit = state.attributes.get("unit_of_measurement")
-        target = self.hass.config.units.length_unit
-        if unit and unit != target and unit in DistanceConverter.VALID_UNITS:
-            value = DistanceConverter.convert(value, unit, target)
-        return value
-
     def _set_odometer_baseline(self, vehicle_id: str) -> bool:
         """Remember the first valid odometer reading; True if it was set."""
         vehicle = self.vehicles[vehicle_id]
         if vehicle_id in self.odometer or not vehicle.odometer_entity_id:
             return False
-        reading = self.odometer_reading(vehicle)
+        reading = read_odometer(self.hass, vehicle)
         if reading is None:
             return False
         self.odometer[vehicle_id] = OdometerBaseline(
@@ -289,7 +278,7 @@ class EvChargeLogCoordinator:
             raise ValidationError(
                 "odometer reading must not be negative", "odometer_negative"
             )
-        reading = self.odometer_reading(vehicle)
+        reading = read_odometer(self.hass, vehicle)
         if reading is not None and start > reading:
             raise ValidationError(
                 f"odometer reading {start:g} is above the current reading {reading:g}",
@@ -318,7 +307,7 @@ class EvChargeLogCoordinator:
         vehicle = self.vehicles.get(vehicle_id)
         if baseline is None or vehicle is None:
             return None
-        reading = self.odometer_reading(vehicle)
+        reading = read_odometer(self.hass, vehicle)
         if reading is None:
             return None
         return cost_per_100(self.log.sessions(vehicle_id=vehicle_id), baseline, reading)
@@ -329,7 +318,7 @@ class EvChargeLogCoordinator:
         vehicle = self.vehicles.get(vehicle_id)
         if baseline is None or vehicle is None:
             return None
-        reading = self.odometer_reading(vehicle)
+        reading = read_odometer(self.hass, vehicle)
         if reading is None:
             return None
         return energy_per_100(
@@ -382,73 +371,6 @@ class EvChargeLogCoordinator:
 
     # --- push to phones (stage 4) -------------------------------------------
 
-    @staticmethod
-    def _push_tag(vehicle_id: str) -> str:
-        return f"{DOMAIN}_{vehicle_id}"
-
-    async def _async_text(self, key: str, **placeholders: Any) -> str:
-        """Translated message from the "exceptions" category."""
-        texts = await async_get_translations(
-            self.hass, self.hass.config.language, "exceptions", [DOMAIN]
-        )
-        text = texts.get(f"component.{DOMAIN}.exceptions.{key}.message", key)
-        return text.format(**placeholders)
-
-    async def _async_push(
-        self, vehicle: Vehicle, title: str, message: str, *, ask_kwh: bool
-    ) -> None:
-        """Send a notification to the vehicle's phones (Companion app).
-
-        With `ask_kwh` it has a text input for kWh (and optional cost) and a
-        button that opens the panel. Tapping the notification itself opens
-        the panel too (`clickAction` on Android, `url` on iOS). The tag makes
-        a new notification replace the old.
-        """
-        panel = f"/{PANEL_URL_PATH}"
-        data: dict[str, Any] = {
-            "tag": self._push_tag(vehicle.id),
-            "clickAction": panel,
-            "url": panel,
-        }
-        if ask_kwh:
-            data["actions"] = [
-                {
-                    "action": f"{PUSH_ACTION_PREFIX}{vehicle.id}",
-                    "title": await self._async_text("push_reply"),
-                    "behavior": "textInput",
-                },
-                {
-                    "action": "URI",
-                    "title": await self._async_text("push_open"),
-                    "uri": panel,
-                },
-            ]
-        await self._async_send(
-            vehicle, {"title": title, "message": message, "data": data}
-        )
-
-    async def _async_clear_push(self, vehicle: Vehicle) -> None:
-        """Remove the notification from the vehicle's phones."""
-        await self._async_send(
-            vehicle,
-            {
-                "message": "clear_notification",
-                "data": {"tag": self._push_tag(vehicle.id)},
-            },
-        )
-
-    async def _async_send(self, vehicle: Vehicle, payload: dict[str, Any]) -> None:
-        for service in vehicle.notify_services:
-            if not self.hass.services.has_service("notify", service):
-                _LOGGER.warning("Notify service notify.%s not found", service)
-                continue
-            try:
-                await self.hass.services.async_call(
-                    "notify", service, payload, blocking=True
-                )
-            except HomeAssistantError as err:
-                _LOGGER.warning("Sending to notify.%s failed: %s", service, err)
-
     @callback
     def _async_push_action(self, event: Event) -> None:
         """A reply from a phone: book the typed kWh."""
@@ -473,19 +395,21 @@ class EvChargeLogCoordinator:
         """
         detected = self.detection.get(vehicle.id)
         if detected is None or detected.pending is None:
-            await self._async_push(
+            await async_push(
+                self.hass,
                 vehicle,
                 vehicle.name,
-                await self._async_text("push_already_booked"),
+                await async_text(self.hass, "push_already_booked"),
                 ask_kwh=False,
             )
             return
         reply = parse_reply(text, self.hass.config.currency)
         if reply is None:
-            await self._async_push(
+            await async_push(
+                self.hass,
                 vehicle,
                 vehicle.name,
-                await self._async_text("push_invalid", text=text or ""),
+                await async_text(self.hass, "push_invalid", text=text or ""),
                 ask_kwh=True,
             )
             return
@@ -504,22 +428,26 @@ class EvChargeLogCoordinator:
                 clear_push=False,
             )
         except ValidationError as err:
-            await self._async_push(
+            await async_push(
+                self.hass,
                 vehicle,
                 vehicle.name,
-                await self._async_text(
+                await async_text(
+                    self.hass,
                     "push_failed",
-                    error=await self._async_text(err.key, **err.placeholders),
+                    error=await async_text(self.hass, err.key, **err.placeholders),
                 ),
                 ask_kwh=True,
             )
             return
         self.async_reset_input(vehicle.id)
         tariff = self.tariffs.get(session.tariff_id) if session.tariff_id else None
-        await self._async_push(
+        await async_push(
+            self.hass,
             vehicle,
             vehicle.name,
-            await self._async_text(
+            await async_text(
+                self.hass,
                 "push_booked",
                 energy=f"{session.energy_kwh:g}",
                 cost=f"{session.cost:.2f}",
@@ -579,8 +507,8 @@ class EvChargeLogCoordinator:
                 current,
                 new_state,
                 dt_util.now(),
-                self._soc(vehicle),
-                self._zone(vehicle),
+                read_soc(self.hass, vehicle),
+                read_zone(self.hass, vehicle),
             )
             if result.state == current:
                 return
@@ -601,7 +529,9 @@ class EvChargeLogCoordinator:
         if charge.zone is not None and charge.zone in vehicle.reminder_excluded_zones:
             return
         self.hass.async_create_task(
-            self._async_notify_charge(vehicle, charge, tariff),
+            async_show_reminder(
+                self.hass, vehicle, charge, tariff, self._device_id(vehicle.id)
+            ),
             f"{DOMAIN} reminder {vehicle.id}",
         )
         self.hass.bus.async_fire(
@@ -622,92 +552,11 @@ class EvChargeLogCoordinator:
             },
         )
 
-    async def _async_notify_charge(
-        self, vehicle: Vehicle, charge: PendingCharge, tariff: Tariff | None
-    ) -> None:
-        """Show the reminder in the HA notifications (no automation needed).
-
-        One notification per vehicle; it is dismissed when the charge is
-        booked. The texts come from the translations ("exceptions" category,
-        the one HA provides for backend messages with placeholders).
-        """
-        texts = await async_get_translations(
-            self.hass, self.hass.config.language, "exceptions", [DOMAIN]
-        )
-        prefix = f"component.{DOMAIN}.exceptions"
-
-        def number(value: float | None) -> str:
-            return "-" if value is None else f"{value:g}"
-
-        device_id = self._device_id(vehicle.id)
-        if PANEL_URL_PATH in self.hass.data.get(frontend.DATA_PANELS, {}):
-            url = f"/{PANEL_URL_PATH}"
-        elif device_id:
-            url = f"/config/devices/device/{device_id}"
-        else:
-            url = "/config"
-        placeholders = {
-            "vehicle": vehicle.name,
-            "time": dt_util.as_local(charge.ended_at).strftime("%Y-%m-%d %H:%M"),
-            "soc_start": number(charge.soc_start),
-            "soc_end": number(charge.soc_end),
-            "tariff": tariff.name if tariff else "-",
-            "url": url,
-        }
-        title = texts.get(f"{prefix}.reminder_title.message", "{vehicle}")
-        message = texts.get(f"{prefix}.reminder_message.message", "{time}")
-        persistent_notification.async_create(
-            self.hass,
-            message.format(**placeholders),
-            title=title.format(**placeholders),
-            notification_id=self._notification_id(vehicle.id),
-        )
-        if vehicle.notify_services:
-            await self._async_push(
-                vehicle,
-                title.format(**placeholders),
-                await self._async_text("push_message", **placeholders),
-                ask_kwh=True,
-            )
-
-    @staticmethod
-    def _notification_id(vehicle_id: str) -> str:
-        return f"{DOMAIN}_charge_{vehicle_id}"
-
     def tariff_for_zone(self, zone: str | None) -> Tariff | None:
         """The tariff a zone is assigned to (a zone belongs to at most one)."""
         if zone is None:
             return None
         return next((t for t in self.tariffs.values() if zone in t.zones), None)
-
-    def _soc(self, vehicle: Vehicle) -> float | None:
-        """Current SoC in percent, None if not configured or not available."""
-        if not vehicle.soc_entity_id:
-            return None
-        state = self.hass.states.get(vehicle.soc_entity_id)
-        try:
-            value = float(state.state) if state else None
-        except ValueError:
-            return None
-        return value if value is not None and 0 <= value <= 100 else None
-
-    def _zone(self, vehicle: Vehicle) -> str | None:
-        """Zone entity the vehicle is in, None if unknown or in no zone.
-
-        Trackers and persons report the zone name as their state ("home" for
-        the home zone).
-        """
-        if not vehicle.location_entity_id:
-            return None
-        state = self.hass.states.get(vehicle.location_entity_id)
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return None
-        if state.state == STATE_HOME:
-            return ZONE_HOME
-        for zone in self.hass.states.async_all("zone"):
-            if zone.name == state.state:
-                return zone.entity_id
-        return None
 
     def _device_id(self, vehicle_id: str) -> str | None:
         if self._vehicles_entry_id is None:
@@ -815,8 +664,8 @@ class EvChargeLogCoordinator:
                 (KIND_ENERGY, "statistic_energy"),
                 (KIND_COST, "statistic_cost"),
             ):
-                names[vehicle.id, kind] = await self._async_text(
-                    key, vehicle=vehicle.name
+                names[vehicle.id, kind] = await async_text(
+                    self.hass, key, vehicle=vehicle.name
                 )
         ids = statistic_ids(names)
         tz = dt_util.get_default_time_zone()
@@ -875,7 +724,7 @@ class EvChargeLogCoordinator:
             and day < dt_util.as_local(current.pending.ended_at).date()
         )
         defaults = booking_defaults(
-            current, self._soc(vehicle), backdated, before_pending
+            current, read_soc(self.hass, vehicle), backdated, before_pending
         )
         timestamp = (
             defaults.timestamp
@@ -895,13 +744,7 @@ class EvChargeLogCoordinator:
         session = self.log.add(data, self.tariffs)
         if defaults.from_detection:
             self.detection[data.vehicle_id] = after_booking(current)
-            persistent_notification.async_dismiss(
-                self.hass, self._notification_id(data.vehicle_id)
-            )
-            if clear_push and vehicle.notify_services:
-                self.hass.async_create_task(
-                    self._async_clear_push(vehicle), f"{DOMAIN} clear push"
-                )
+            async_dismiss_reminder(self.hass, vehicle, clear_push=clear_push)
         await self._async_commit()
         return session
 

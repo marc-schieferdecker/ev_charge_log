@@ -14,20 +14,22 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any, Final
 
-from .models import (
-    Fee,
+from .csv_io import (
     ImportProblem,
     ImportResult,
     ImportRow,
+    build_imported_session,
+    duplicate_key,
+)
+from .models import (
+    Fee,
     Session,
     SessionInput,
     Summary,
     Tariff,
     ValidationError,
     Vehicle,
-    build_imported_session,
     build_session,
-    duplicate_key,
     round_money,
     summarize,
 )
