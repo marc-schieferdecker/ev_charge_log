@@ -145,6 +145,7 @@ class VehicleInput:
     day: date | None = None  # None: today
     soc_start: float | None = None  # by hand; overrides the detection
     soc_end: float | None = None
+    note: str | None = None
 
 
 class EvChargeLogCoordinator:
@@ -422,6 +423,7 @@ class EvChargeLogCoordinator:
                     charge_type=current.charge_type,
                     timestamp=dt_util.now(),
                     tariff_id=current.tariff_id,
+                    note=current.note,
                     cost=reply.cost,
                 ),
                 timestamp_given=False,
@@ -875,6 +877,7 @@ class EvChargeLogCoordinator:
                 cost=current.cost,
                 soc_start=current.soc_start,
                 soc_end=current.soc_end,
+                note=current.note,
             ),
             timestamp_given=current.day is not None,
         )

@@ -75,8 +75,9 @@ async def test_panel_websocket_lists_vehicles(
     seal = result["vehicles"][1]
     assert seal["id"] == "seal"
     inputs = [row.get("entity") for row in seal["input"]]
-    assert len(inputs) == 6
+    assert len(inputs) == 7
     assert inputs[0].startswith("date.")
+    assert inputs[6].startswith("text.")
     # Both SoC fields in one own row.
     soc = seal["input"][3]
     assert soc["type"] == "soc"
@@ -100,6 +101,7 @@ async def test_panel_websocket_lists_vehicles(
         "SoC",
         "Tarif",
         "Ladeart",
+        "Notiz",
     ]
     assert seal["stats"][0]["entity"].startswith("sensor.")
     assert seal["stats"][0]["name"] == "Gesamtkosten"

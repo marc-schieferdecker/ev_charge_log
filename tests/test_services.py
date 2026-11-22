@@ -498,6 +498,56 @@ async def test_reset_clears_date(hass: HomeAssistant, entry) -> None:
     assert hass.states.get(day).state == "unknown"
 
 
+async def _set_note(hass: HomeAssistant, entity_id: str, value: str) -> None:
+    await hass.services.async_call(
+        "text", "set_value", {"entity_id": entity_id, "value": value}, blocking=True
+    )
+
+
+async def test_book_with_note_and_clear_it(hass: HomeAssistant, entry) -> None:
+    note = _entity(hass, "text", "seal", "input_note")
+    assert hass.states.get(note).state == ""  # empty, not "unknown"
+
+    await _set_note(hass, note, "  dienstlich Kunde X ")
+    assert hass.states.get(note).state == "dienstlich Kunde X"
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_energy"), value=20
+    )
+    await _press(hass, _entity(hass, "button", "seal", "book"))
+
+    session = entry.runtime_data.log.last_session("seal")
+    assert session.note == "dienstlich Kunde X"
+    assert hass.states.get(note).state == ""  # cleared after booking
+
+
+async def test_blank_note_is_no_note(hass: HomeAssistant, entry) -> None:
+    await _set_note(hass, _entity(hass, "text", "seal", "input_note"), "   ")
+    await _set(
+        hass, "number", _entity(hass, "number", "seal", "input_energy"), value=20
+    )
+    await _press(hass, _entity(hass, "button", "seal", "book"))
+    assert entry.runtime_data.log.last_session("seal").note is None
+
+
+async def test_reset_clears_note(hass: HomeAssistant, entry) -> None:
+    note = _entity(hass, "text", "seal", "input_note")
+    await _set_note(hass, note, "dienstlich")
+    await _press(hass, _entity(hass, "button", "seal", "reset_input"))
+    assert hass.states.get(note).state == ""
+
+
+async def test_note_of_each_vehicle_is_separate(hass: HomeAssistant, entry) -> None:
+    await _set_note(hass, _entity(hass, "text", "seal", "input_note"), "dienstlich")
+    assert hass.states.get(_entity(hass, "text", "dolphin", "input_note")).state == ""
+
+
+async def test_note_longer_than_limit_is_rejected(hass: HomeAssistant, entry) -> None:
+    note = _entity(hass, "text", "seal", "input_note")
+    with pytest.raises(ValueError, match="too long"):
+        await _set_note(hass, note, "x" * 256)
+    assert hass.states.get(note).state == ""
+
+
 async def test_legacy_time_input_is_removed(hass: HomeAssistant) -> None:
     registry = er.async_get(hass)
     legacy = registry.async_get_or_create("datetime", DOMAIN, "seal_input_time")

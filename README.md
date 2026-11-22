@@ -175,6 +175,7 @@ input entities to book a session:
 | Input tariff | Preset with the vehicle's default tariff |
 | Input charge type | AC or DC; follows the tariff if it has only one price |
 | Input date (optional) | Day of the session; empty means today. The current time of day is used |
+| Input note (optional) | Note of the session, up to 255 characters, e.g. "business". Also taken over by a reply on the phone |
 | Book session | Books the input and clears it. Time: the entered date, else the end of a detected charge, else now |
 | Reset input | Clears the input without booking (not shown on the Charging log page) |
 

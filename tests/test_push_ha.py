@@ -125,6 +125,21 @@ async def test_reply_books_the_charge(hass: HomeAssistant, entries, phones) -> N
     assert confirmation["data"]["tag"] == "ev_charge_log_seal"
 
 
+async def test_reply_takes_the_note_of_the_input(
+    hass: HomeAssistant, entries, phones
+) -> None:
+    vehicles, _ = entries
+    note = er.async_get(hass).async_get_entity_id("text", DOMAIN, "seal_input_note")
+    await hass.services.async_call(
+        "text", "set_value", {"entity_id": note, "value": "dienstlich"}, blocking=True
+    )
+    await _charge(hass, SEAL_CHARGING)
+    await _reply(hass, "seal", "12,4")
+
+    assert vehicles.runtime_data.log.last_session("seal").note == "dienstlich"
+    assert hass.states.get(note).state == ""  # input reset after booking
+
+
 async def test_reply_twice_books_once(hass: HomeAssistant, entries, phones) -> None:
     vehicles, _ = entries
     await _charge(hass, SEAL_CHARGING)

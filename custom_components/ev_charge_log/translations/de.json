@@ -209,6 +209,9 @@
     "date": {
       "input_date": { "name": "Eingabe Datum (optional)" }
     },
+    "text": {
+      "input_note": { "name": "Eingabe Notiz (optional)" }
+    },
     "number": {
       "input_energy": { "name": "Eingabe Energie" },
       "input_cost": { "name": "Eingabe Betrag (optional)" },
@@ -352,6 +355,7 @@
     "panel_label_input_soc": { "message": "SoC" },
     "panel_label_input_tariff": { "message": "Tarif" },
     "panel_label_input_charge_type": { "message": "Ladeart" },
+    "panel_label_input_note": { "message": "Notiz" },
     "panel_label_book": { "message": "Ladung buchen" },
     "panel_label_reset_input": { "message": "Eingabe zurücksetzen" },
     "statistic_energy": { "message": "{vehicle} Ladeenergie" },

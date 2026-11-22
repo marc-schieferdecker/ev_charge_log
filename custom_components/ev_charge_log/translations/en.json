@@ -209,6 +209,9 @@
     "date": {
       "input_date": { "name": "Input date (optional)" }
     },
+    "text": {
+      "input_note": { "name": "Input note (optional)" }
+    },
     "number": {
       "input_energy": { "name": "Input energy" },
       "input_cost": { "name": "Input cost (optional)" },
@@ -352,6 +355,7 @@
     "panel_label_input_soc": { "message": "SoC" },
     "panel_label_input_tariff": { "message": "Tariff" },
     "panel_label_input_charge_type": { "message": "Charge type" },
+    "panel_label_input_note": { "message": "Note" },
     "panel_label_book": { "message": "Book session" },
     "panel_label_reset_input": { "message": "Reset input" },
     "statistic_energy": { "message": "{vehicle} charging energy" },

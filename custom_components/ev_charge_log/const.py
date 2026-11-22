@@ -87,3 +87,6 @@ SOURCES: Final = (SOURCE_MANUAL, SOURCE_REMINDER)
 # Seconds to wait before rewriting the recorder statistics, so several
 # changes in a row are written once (stage 5).
 STATISTICS_DELAY: Final = 5
+# Longest note of the dashboard input (stage 9a); the note of the services is
+# not limited.
+NOTE_MAX_LENGTH: Final = 255

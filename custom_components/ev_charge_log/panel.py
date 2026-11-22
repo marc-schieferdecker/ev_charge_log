@@ -86,6 +86,7 @@ INPUT_ENTITIES = (
     (SOC_ROW, "input_soc"),
     ("select", "input_tariff"),
     ("select", "input_charge_type"),
+    ("text", "input_note"),
     # "book" is sent separately and shown as an own button below the inputs;
     # "reset_input" is left out on purpose (user request), the entity stays
     # available for own dashboards.
