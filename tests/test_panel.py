@@ -761,3 +761,167 @@ async def test_panel_shows_odometer_below_total_energy(hass: HomeAssistant) -> N
     assert seal["stats"][2]["entity"] == "sensor.seal_odometer"
     # Without an odometer sensor: no row.
     assert "Kilometerstand" not in [row["name"] for row in dolphin["stats"]]
+
+
+async def _report_sessions(hass: HomeAssistant):
+    """Three sessions in August and September 2026."""
+    from datetime import datetime
+
+    from custom_components.ev_charge_log.models import SessionInput
+
+    hass.config.language = "de"
+    hass.config.currency = "EUR"
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    vehicles, _ = await setup_entries(hass, SUBENTRIES)
+    coord = vehicles.runtime_data
+    tz = dt_util.get_default_time_zone()
+    for vehicle_id, charge_type, day, note in (
+        ("seal", "ac", datetime(2026, 8, 10, 18, 30, tzinfo=tz), "Dienstlich"),
+        ("seal", "dc", datetime(2026, 8, 11, 9, 0, tzinfo=tz), None),
+        ("dolphin", "ac", datetime(2026, 9, 1, 7, 0, tzinfo=tz), None),
+    ):
+        await coord.async_add_session(
+            SessionInput(
+                vehicle_id=vehicle_id,
+                energy_kwh=10.0,
+                charge_type=charge_type,
+                timestamp=day,
+                tariff_id="enbw",
+                note=note,
+            )
+        )
+    return coord
+
+
+async def test_panel_report_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    await _report_sessions(hass)
+    today = dt_util.now().date()
+    # 2026 up to the current month while it runs, all 12 months afterwards.
+    last_month = today.month if today.year == 2026 else 12
+    data = await async_panel_data(hass)
+    assert data["texts"]["panel_report"] == "Bericht"
+    assert data["texts"]["panel_report_title_year"] == "Ladebericht {year}"
+
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_report", "period": "2026"}
+    )
+    response = await client.receive_json()
+    assert response["success"], response
+    result = response["result"]
+    assert result["current"] == (today.year == 2026)
+    assert result["summary"]["sessions"] == 3
+    assert result["summary"]["total"] == 18.7  # 5.90 + 6.90 + 5.90
+    assert [row["key"] for row in result["periods"]] == [
+        f"2026-{m:02d}" for m in range(1, last_month + 1)
+    ]
+    assert [row["name"] for row in result["vehicles"]] == ["Dolphin", "Seal U"]
+    assert [row["key"] for row in result["charge_types"]] == ["ac", "dc"]
+    assert result["sessions"] is None
+
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_report",
+            "period": "2026-08",
+            "vehicle_id": "seal",
+            "tariff_id": "enbw",
+            "note": "dienst",
+            "sessions": True,
+        }
+    )
+    result = (await client.receive_json())["result"]
+    assert result["fees_excluded"]
+    assert result["vehicles"] is None
+    assert [row["key"] for row in result["periods"]] == ["2026-08-10"]
+    assert result["sessions"] == [
+        {
+            "id": result["sessions"][0]["id"],
+            "date": "2026-08-10",
+            "time": "18:30",
+            "vehicle": "Seal U",
+            "tariff": "EnBW",
+            "charge_type": "ac",
+            "energy": 10.0,
+            "cost": 5.9,
+            "soc_start": None,
+            "soc_end": None,
+            "note": "Dienstlich",
+        }
+    ]
+
+    for message, code in (
+        ({"period": str(today.year + 1)}, "error_report_period"),
+        ({"period": "2026", "vehicle_id": "nope"}, "error_unknown_vehicle"),
+        ({"period": "2026", "tariff_id": "nope"}, "error_unknown_tariff"),
+        ({"period": "2026-13"}, "invalid_format"),
+    ):
+        await client.send_json_auto_id(
+            {"type": "ev_charge_log/panel_report", **message}
+        )
+        response = await client.receive_json()
+        assert not response["success"]
+        assert response["error"]["code"] == code, message
+
+
+async def test_panel_report_pdf_websocket(hass: HomeAssistant, hass_ws_client) -> None:
+    import base64
+    import io
+
+    from pypdf import PdfReader
+
+    await _report_sessions(hass)
+    months = [
+        "Januar",
+        "Februar",
+        "März",
+        "April",
+        "Mai",
+        "Juni",
+        "Juli",
+        "August",
+        "September",
+        "Oktober",
+        "November",
+        "Dezember",
+    ]
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_report_pdf",
+            "period": "2026-08",
+            "vehicle_id": "seal",
+            "sessions": True,
+            "format": {"decimal": ",", "group": ".", "months": months, "currency": "€"},
+        }
+    )
+    response = await client.receive_json()
+    assert response["success"], response
+    assert response["result"]["filename"] == "ev-charge-log-2026-08-seal-u.pdf"
+    pdf = base64.b64decode(response["result"]["pdf"])
+    assert pdf.startswith(b"%PDF")
+    text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Ladebericht August 2026" in text
+    assert "Seal U" in text
+    assert "Kosten (€)" in text
+    assert "12,80 €" in text  # 5.90 + 6.90 with the decimal comma
+
+    # Without a format: English month names, decimal point, currency code.
+    await client.send_json_auto_id(
+        {"type": "ev_charge_log/panel_report_pdf", "period": "2026-08"}
+    )
+    response = await client.receive_json()
+    assert response["success"], response
+    assert response["result"]["filename"] == "ev-charge-log-2026-08.pdf"
+    pdf = base64.b64decode(response["result"]["pdf"])
+    text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Ladebericht August 2026" in text
+    assert "12.80 EUR" in text
+
+    await client.send_json_auto_id(
+        {
+            "type": "ev_charge_log/panel_report_pdf",
+            "period": str(dt_util.now().year + 1),
+        }
+    )
+    response = await client.receive_json()
+    assert response["error"]["code"] == "error_report_period"

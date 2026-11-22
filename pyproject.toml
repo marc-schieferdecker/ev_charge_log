@@ -2,6 +2,10 @@
 name = "ev_charge_log"
 version = "0.1.0"
 requires-python = ">=3.14"
+# Runtime requirement of the integration (keep in sync with manifest.json).
+dependencies = [
+    "fpdf2==2.9.0",
+]
 
 [dependency-groups]
 dev = [
@@ -10,6 +14,8 @@ dev = [
     "ruff>=0.8",
     # Time zone data for zoneinfo on Windows (Linux has it from the system).
     "tzdata",
+    # Reads the text of generated PDFs in the tests.
+    "pypdf",
 ]
 # Home Assistant test harness; Linux only (run in WSL or CI).
 ha = [

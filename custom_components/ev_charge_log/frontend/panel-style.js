@@ -486,6 +486,50 @@ export const STYLE = `
   .compare-result .tariff-hint {
     padding: 0;
   }
+  .dialog.report-dialog {
+    max-width: 820px;
+  }
+  .report-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  .report-result h3 {
+    margin: 8px 0 4px;
+    font-size: 18px;
+    font-weight: 500;
+  }
+  .report-result h4 {
+    margin: 16px 0 4px;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .report-result .tariff-hint {
+    padding: 0 0 4px;
+  }
+  .report-result .tariff-table th:first-child,
+  .report-result .tariff-table td:first-child {
+    padding-left: 0;
+  }
+  .report-result .tariff-table th:last-child,
+  .report-result .tariff-table td:last-child {
+    padding-right: 0;
+  }
+  /* The note wraps instead of widening the list. */
+  .report-result .report-sessions td:last-child {
+    white-space: normal;
+    text-align: left;
+    min-width: 120px;
+  }
+  .report-result .report-sessions th:last-child {
+    text-align: left;
+  }
+  .report-buttons {
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
   .compare-verdict {
     font-weight: 500;
   }

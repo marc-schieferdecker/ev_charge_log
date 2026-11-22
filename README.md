@@ -165,6 +165,15 @@ least one of the selected sessions. Sessions
 of a charge type without a price in a tariff count with their actual cost.
 Nothing is stored.
 
+**Report:** The report button left of it summarizes a year or a month:
+sessions, energy, cost with monthly fees, average price per kWh and the
+energy charged for free, then tables per month (or per day), per tariff,
+AC/DC and per vehicle, optionally with all sessions. Filter by vehicle,
+tariff and "note contains", e.g. enter "business" as the note when
+booking and filter for it in the report. With a note filter the monthly
+fees are left out, they have no note. **Export as PDF** downloads the
+report shown as a PDF file; nothing is saved in Home Assistant.
+
 You can also use the entities on your own dashboards. Every vehicle gets
 input entities to book a session:
 
@@ -266,3 +275,8 @@ tariff keeps the sessions and fees with their stored cost.
 ## License
 
 [MIT](LICENSE)
+
+The PDF report uses the font Noto Sans (`custom_components/ev_charge_log/fonts`),
+licensed under the [SIL Open Font License 1.1](custom_components/ev_charge_log/fonts/OFL.txt),
+and the library [fpdf2](https://github.com/py-pdf/fpdf2) (LGPL-3.0), which
+Home Assistant installs as a requirement.

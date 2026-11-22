@@ -11,7 +11,16 @@ from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Any
 
-from .models import Fee, Session, Tariff, month_of, round_money
+from .const import CHARGE_TYPES
+from .models import (
+    Fee,
+    Session,
+    Tariff,
+    ValidationError,
+    month_of,
+    month_starts,
+    round_money,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,3 +338,264 @@ def soc_metrics(
         loss = round((session.energy_kwh - stored_kwh) / session.energy_kwh * 100, 1)
     cost_per_point = round(session.cost / points, 4) if points > 0 else None
     return SocMetrics(points, loss, cost_per_point)
+
+
+# --- Annual and monthly report (stage 9) -------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ReportRow:
+    """One row of a report table, or its total.
+
+    `cost` is the stored cost of the sessions, `fee` the booked monthly fees
+    (0 without). `total` is both together; the average price per kWh is
+    based on it, like the sensor "average price". `key` is the month
+    ("YYYY-MM"), day (ISO), tariff ID, vehicle ID or charge type of the row;
+    None for "without tariff" and for totals.
+    """
+
+    key: str | None
+    name: str | None
+    session_count: int
+    energy_kwh: float
+    cost: float
+    fee: float
+
+    @property
+    def total(self) -> float:
+        """Cost of the sessions and fees."""
+        return float(Decimal(str(self.cost)) + Decimal(str(self.fee)))
+
+    @property
+    def average_price(self) -> float | None:
+        """Total per kWh, rounded to 4 decimals; None without energy."""
+        if self.energy_kwh == 0:
+            return None
+        return round(self.total / self.energy_kwh, 4)
+
+
+@dataclass(frozen=True, slots=True)
+class Report:
+    """Annual or monthly report of the selected sessions and fees.
+
+    `periods` has one row per month (annual report; all months up to the
+    current one, also without sessions) or per day with a session or fee
+    (monthly report). `vehicles` is only set for all vehicles, `sessions`
+    only if they are listed (oldest first). `fees_excluded` is True if the
+    note filter left out the fees.
+    """
+
+    period: str
+    first_day: date
+    last_day: date
+    current: bool
+    summary: ReportRow
+    free_energy_kwh: float
+    fees_excluded: bool
+    periods: list[ReportRow]
+    tariffs: list[ReportRow]
+    charge_types: list[ReportRow]
+    vehicles: list[ReportRow] | None
+    sessions: list[Session] | None
+
+
+def _report_span(period: str, today: date) -> tuple[date, date, bool]:
+    """First and last day of "YYYY" or "YYYY-MM"; True for a monthly report."""
+    try:
+        if len(period) == 4 and period.isdigit():
+            first, last = date(int(period), 1, 1), date(int(period), 12, 31)
+            monthly = False
+        elif len(period) == 7 and period[4] == "-":
+            year, month = int(period[:4]), int(period[5:])
+            first = date(year, month, 1)
+            following = (
+                date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+            )
+            last = following - timedelta(days=1)
+            monthly = True
+        else:
+            raise ValueError(period)
+    except ValueError:
+        raise ValidationError(
+            f"invalid report period: {period}", "report_period", period=period
+        ) from None
+    if first > today:
+        raise ValidationError(
+            f"report period {period} is in the future", "report_period", period=period
+        )
+    return first, last, monthly
+
+
+def _report_row(
+    key: str | None,
+    name: str | None,
+    sessions: Iterable[Session],
+    fees: Iterable[Fee] = (),
+) -> ReportRow:
+    sessions = list(sessions)
+    return ReportRow(
+        key=key,
+        name=name,
+        session_count=len(sessions),
+        energy_kwh=float(
+            sum((Decimal(str(s.energy_kwh)) for s in sessions), Decimal(0))
+        ),
+        cost=float(sum((Decimal(str(s.cost)) for s in sessions), Decimal(0))),
+        fee=float(sum((Decimal(str(f.amount)) for f in fees), Decimal(0))),
+    )
+
+
+def _fee_day(fee: Fee) -> date:
+    year, month = (int(part) for part in fee.month.split("-"))
+    return date(year, month, 1)
+
+
+def report(
+    sessions: Iterable[Session],
+    fees: Iterable[Fee],
+    tariffs: Mapping[str, Tariff],
+    vehicles: Mapping[str, str],
+    period: str,
+    day_of: Callable[[Session], date],
+    today: date,
+    *,
+    vehicle_id: str | None = None,
+    tariff_id: str | None = None,
+    note: str | None = None,
+    include_sessions: bool = False,
+) -> Report:
+    """Annual ("YYYY") or monthly ("YYYY-MM") report.
+
+    `vehicles` maps the IDs of the existing vehicles to their names, `day_of`
+    gives the local day of a session, `today` the local date. Filters:
+    vehicle, tariff (sessions without or of a deleted tariff only without a
+    tariff filter) and note (part of the note, case-insensitive; sessions
+    without a note drop out). A monthly fee counts on the first of its
+    month; with a note filter there are no fees, they have no note.
+    Nothing is recalculated: costs are the stored ones.
+    """
+    first, last, monthly = _report_span(period, today)
+    if vehicle_id is not None and vehicle_id not in vehicles:
+        raise ValidationError(
+            f"unknown vehicle: {vehicle_id}", "unknown_vehicle", vehicle=vehicle_id
+        )
+    if tariff_id is not None and tariff_id not in tariffs:
+        raise ValidationError(
+            f"unknown tariff: {tariff_id}", "unknown_tariff", tariff=tariff_id
+        )
+    needle = (note or "").strip().casefold()
+
+    def wanted_vehicle(vid: str) -> bool:
+        return vid in vehicles and (vehicle_id is None or vid == vehicle_id)
+
+    def tariff_key(tid: str | None) -> str | None:
+        return tid if tid in tariffs else None
+
+    chosen = [
+        s
+        for s in sessions
+        if first <= day_of(s) <= last
+        and wanted_vehicle(s.vehicle_id)
+        and (tariff_id is None or s.tariff_id == tariff_id)
+        and (not needle or needle in (s.note or "").casefold())
+    ]
+    chosen.sort(key=lambda s: s.timestamp)
+    chosen_fees = (
+        []
+        if needle
+        else [
+            f
+            for f in fees
+            if first <= _fee_day(f) <= last
+            and wanted_vehicle(f.vehicle_id)
+            and (tariff_id is None or f.tariff_id == tariff_id)
+        ]
+    )
+
+    # Per month (annual report) or per day with a session or fee (monthly).
+    if monthly:
+        days = sorted({day_of(s) for s in chosen} | {_fee_day(f) for f in chosen_fees})
+        periods = [
+            _report_row(
+                day.isoformat(),
+                None,
+                (s for s in chosen if day_of(s) == day),
+                (f for f in chosen_fees if _fee_day(f) == day),
+            )
+            for day in days
+        ]
+    else:
+        until = min(last, today)
+        periods = [
+            _report_row(
+                month_of(start),
+                None,
+                (s for s in chosen if month_of(day_of(s)) == month_of(start)),
+                (f for f in chosen_fees if f.month == month_of(start)),
+            )
+            for start in month_starts(first, until)
+        ]
+
+    # Per tariff: sorted by name, "without tariff" last.
+    tariff_ids = {tariff_key(s.tariff_id) for s in chosen} | {
+        tariff_key(f.tariff_id) for f in chosen_fees
+    }
+    tariff_rows = [
+        _report_row(
+            tid,
+            tariffs[tid].name,
+            (s for s in chosen if s.tariff_id == tid),
+            (f for f in chosen_fees if f.tariff_id == tid),
+        )
+        for tid in tariff_ids
+        if tid is not None
+    ]
+    tariff_rows.sort(key=lambda r: ((r.name or "").casefold(), r.key or ""))
+    if None in tariff_ids:
+        tariff_rows.append(
+            _report_row(
+                None,
+                None,
+                (s for s in chosen if tariff_key(s.tariff_id) is None),
+                (f for f in chosen_fees if tariff_key(f.tariff_id) is None),
+            )
+        )
+
+    charge_types = [
+        _report_row(kind, None, group)
+        for kind in CHARGE_TYPES
+        if (group := [s for s in chosen if s.charge_type == kind])
+    ]
+
+    vehicle_rows = None
+    if vehicle_id is None:
+        ids = {s.vehicle_id for s in chosen} | {f.vehicle_id for f in chosen_fees}
+        vehicle_rows = sorted(
+            (
+                _report_row(
+                    vid,
+                    vehicles[vid],
+                    (s for s in chosen if s.vehicle_id == vid),
+                    (f for f in chosen_fees if f.vehicle_id == vid),
+                )
+                for vid in ids
+            ),
+            key=lambda r: ((r.name or "").casefold(), r.key or ""),
+        )
+
+    return Report(
+        period=period,
+        first_day=first,
+        last_day=last,
+        current=first <= today <= last,
+        summary=_report_row(None, None, chosen, chosen_fees),
+        free_energy_kwh=float(
+            sum((Decimal(str(s.energy_kwh)) for s in chosen if s.cost == 0), Decimal(0))
+        ),
+        fees_excluded=bool(needle),
+        periods=periods,
+        tariffs=tariff_rows,
+        charge_types=charge_types,
+        vehicles=vehicle_rows,
+        sessions=chosen if include_sessions else None,
+    )

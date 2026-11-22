@@ -23,6 +23,7 @@ const [
   { compareMethods },
   { chartMethods },
   { tariffStatsMethods },
+  { reportMethods },
 ] = await Promise.all([
   load("panel-style"),
   load("panel-rows"),
@@ -30,6 +31,7 @@ const [
   load("panel-compare"),
   load("panel-charts"),
   load("panel-tariff-stats"),
+  load("panel-report"),
 ]);
 
 const PAGE_SIZE = 5;
@@ -652,6 +654,7 @@ Object.assign(
   compareMethods,
   chartMethods,
   tariffStatsMethods,
+  reportMethods,
 );
 
 if (!customElements.get("ev-charge-log-panel")) {

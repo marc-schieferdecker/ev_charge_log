@@ -33,6 +33,22 @@ warning from `ev-charge-log` counts as a failure.
 - [ ] "From" after "To" shows the translated error.
 - [ ] Close and reopen: the inputs are remembered.
 
+## Report (button left of the tariff comparison)
+
+- [ ] The dialog opens with "Year" and the current year; the year and month
+      lists reach back to the oldest session or fee.
+- [ ] Switching to "Month" switches "List sessions" on, back to "Year"
+      switches it off.
+- [ ] "Show" shows the summary and the tables; the current period shows
+      the "current year/month" note. "Export as PDF" is enabled now.
+- [ ] Change any input: "Export as PDF" is disabled until "Show" again.
+- [ ] "Export as PDF" downloads a PDF that matches the report shown
+      (number format, month names, currency symbol, page "x of n").
+- [ ] Note filter (e.g. part of a note in other case): only matching
+      sessions, the note about the left-out fees is shown.
+- [ ] A period without sessions shows "No sessions and monthly fees".
+- [ ] Close and reopen: the inputs are remembered.
+
 ## Booking form (top right)
 
 - [ ] With several vehicles, there are toggle buttons. The preselected

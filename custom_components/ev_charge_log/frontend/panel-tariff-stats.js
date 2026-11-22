@@ -79,6 +79,18 @@ export const tariffStatsMethods = {
     compareButton.appendChild(compareIcon);
     compareButton.addEventListener("click", () => this._openCompareDialog());
     pager.prepend(compareButton);
+    // Annual and monthly report (stage 9), left of the comparison.
+    const reportButton = document.createElement("button");
+    reportButton.type = "button";
+    reportButton.className = "export";
+    reportButton.title = texts.panel_report;
+    reportButton.setAttribute("aria-label", texts.panel_report);
+    const reportIcon = document.createElement("ha-icon");
+    reportIcon.icon = "mdi:file-chart-outline";
+    reportIcon.setAttribute("icon", "mdi:file-chart-outline");
+    reportButton.appendChild(reportIcon);
+    reportButton.addEventListener("click", () => this._openReportDialog());
+    pager.prepend(reportButton);
     body.appendChild(
       this._cardHead(`${texts.panel_tariff_stats} · ${this._monthLabel(stats.month)}`, pager)
     );

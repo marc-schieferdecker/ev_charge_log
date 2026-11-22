@@ -7,6 +7,7 @@ which entities belong to them, and builds Home Assistant cards from that.
 
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import date
 from pathlib import Path
@@ -29,7 +30,7 @@ from .compare import (
     WhatIfTariff,
     compare_tariffs,
 )
-from .const import DOMAIN, PANEL_URL_PATH
+from .const import DOMAIN, NOTE_MAX_LENGTH, PANEL_URL_PATH
 from .coordinator import COORDINATOR_KEY, EvChargeLogCoordinator
 from .csv_io import (
     EXPORT_COLUMNS,
@@ -42,9 +43,20 @@ from .models import (
     ValidationError,
     month_of,
 )
+from .report_pdf import (
+    MONTHS_EN,
+    REPORT_TEXT_KEYS,
+    PdfFormat,
+    ReportContext,
+    report_filename,
+    report_pdf,
+)
 from .reports import (
+    Report,
+    ReportRow,
     TariffMonthRow,
     month_totals,
+    report,
     tariff_month_stats,
 )
 
@@ -70,6 +82,26 @@ _WHAT_IF = vol.Schema(
     }
 )
 _MONTH = vol.Match(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+WS_REPORT_TYPE = f"{DOMAIN}/panel_report"
+WS_REPORT_PDF_TYPE = f"{DOMAIN}/panel_report_pdf"
+# Parameters of both report commands (stage 9): a year or a month and filters.
+_REPORT_PARAMS = {
+    vol.Required("period"): vol.Match(r"^\d{4}(-(0[1-9]|1[0-2]))?$"),
+    vol.Optional("vehicle_id"): vol.Any(None, str),
+    vol.Optional("tariff_id"): vol.Any(None, str),
+    vol.Optional("note"): vol.Any(None, vol.All(str, vol.Length(max=NOTE_MAX_LENGTH))),
+    vol.Optional("sessions", default=False): bool,
+}
+# Number format, month names and currency symbol of the page, for the PDF.
+_PDF_FORMAT = vol.Schema(
+    {
+        vol.Optional("decimal", default="."): vol.All(str, vol.Length(min=1, max=1)),
+        vol.Optional("group", default=""): vol.All(str, vol.Length(max=1)),
+        vol.Optional("months"): vol.All([str], vol.Length(min=12, max=12)),
+        vol.Optional("currency"): vol.Any(None, vol.All(str, vol.Length(max=8))),
+    }
+)
 
 SIDEBAR_TITLES = {"de": "Ladungen", "en": "Charging log"}
 
@@ -195,6 +227,15 @@ TEXT_KEYS = (
             "_actual",
         )
     ),
+    *REPORT_TEXT_KEYS,
+    "panel_report",
+    "panel_report_period",
+    "panel_report_year",
+    "panel_report_month",
+    "panel_report_note",
+    "panel_report_list",
+    "panel_report_show",
+    "panel_report_pdf",
 )
 SESSION_LIST_LIMIT = 100
 # Any booking, correction or deletion changes at least one of these.
@@ -227,6 +268,8 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, websocket_export)
         websocket_api.async_register_command(hass, websocket_import)
         websocket_api.async_register_command(hass, websocket_compare)
+        websocket_api.async_register_command(hass, websocket_report)
+        websocket_api.async_register_command(hass, websocket_report_pdf)
         hass.data[_SETUP_DONE] = True
 
     # The frontend is a soft dependency (after_dependencies): always loaded in
@@ -511,6 +554,169 @@ def websocket_compare(
             "actual_total": comparison.actual_total,
         },
     )
+
+
+def build_report(coord: EvChargeLogCoordinator, msg: dict[str, Any]) -> Report:
+    """The report (stage 9) for the parameters of a report command."""
+    return report(
+        coord.log.sessions(),
+        coord.log.fees(),
+        coord.tariffs,
+        {vehicle_id: vehicle.name for vehicle_id, vehicle in coord.vehicles.items()},
+        msg["period"],
+        _local_day,
+        dt_util.now().date(),
+        vehicle_id=msg.get("vehicle_id"),
+        tariff_id=msg.get("tariff_id"),
+        note=msg.get("note"),
+        include_sessions=msg["sessions"],
+    )
+
+
+def _report_row_data(row: ReportRow) -> dict[str, Any]:
+    return {
+        "key": row.key,
+        "name": row.name,
+        "sessions": row.session_count,
+        "energy": row.energy_kwh,
+        "cost": row.cost,
+        "fee": row.fee,
+        "total": row.total,
+        "average": row.average_price,
+    }
+
+
+def report_data(coord: EvChargeLogCoordinator, result: Report) -> dict[str, Any]:
+    """The report for the panel; sessions with local date and time and names."""
+    sessions = None
+    if result.sessions is not None:
+        sessions = []
+        for session in result.sessions:
+            local = dt_util.as_local(session.timestamp)
+            vehicle = coord.vehicles.get(session.vehicle_id)
+            tariff = coord.tariffs.get(session.tariff_id) if session.tariff_id else None
+            sessions.append(
+                {
+                    "id": session.id,
+                    "date": local.date().isoformat(),
+                    "time": local.strftime("%H:%M"),
+                    "vehicle": vehicle.name if vehicle else None,
+                    "tariff": tariff.name if tariff else None,
+                    "charge_type": session.charge_type,
+                    "energy": session.energy_kwh,
+                    "cost": session.cost,
+                    "soc_start": session.soc_start,
+                    "soc_end": session.soc_end,
+                    "note": session.note,
+                }
+            )
+    return {
+        "period": result.period,
+        "current": result.current,
+        "summary": _report_row_data(result.summary),
+        "free_energy": result.free_energy_kwh,
+        "fees_excluded": result.fees_excluded,
+        "periods": [_report_row_data(row) for row in result.periods],
+        "tariffs": [_report_row_data(row) for row in result.tariffs],
+        "charge_types": [_report_row_data(row) for row in result.charge_types],
+        "vehicles": None
+        if result.vehicles is None
+        else [_report_row_data(row) for row in result.vehicles],
+        "sessions": sessions,
+    }
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): WS_REPORT_TYPE, **_REPORT_PARAMS}
+)
+@callback
+def websocket_report(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Annual or monthly report (stage 9) to show in the panel."""
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None:
+        connection.send_error(msg["id"], "not_found", "Not loaded")
+        return
+    try:
+        result = build_report(coord, msg)
+    except ValidationError as err:
+        connection.send_error(msg["id"], err.key, str(err))
+        return
+    connection.send_result(msg["id"], report_data(coord, result))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_REPORT_PDF_TYPE,
+        **_REPORT_PARAMS,
+        vol.Optional("format", default={}): _PDF_FORMAT,
+    }
+)
+@websocket_api.async_response
+async def websocket_report_pdf(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """The report as a PDF (stage 9): file name and the file in Base64.
+
+    Built in the executor: reading the fonts and making the PDF block.
+    """
+    coord = hass.data.get(COORDINATOR_KEY)
+    if coord is None:
+        connection.send_error(msg["id"], "not_found", "Not loaded")
+        return
+    try:
+        result = build_report(coord, msg)
+    except ValidationError as err:
+        connection.send_error(msg["id"], err.key, str(err))
+        return
+    filename, pdf = await async_report_pdf(hass, coord, result, msg)
+    connection.send_result(
+        msg["id"],
+        {"filename": filename, "pdf": base64.b64encode(pdf).decode("ascii")},
+    )
+
+
+async def async_report_pdf(
+    hass: HomeAssistant,
+    coord: EvChargeLogCoordinator,
+    result: Report,
+    msg: dict[str, Any],
+) -> tuple[str, bytes]:
+    """File name and content of the report PDF, texts in the HA language."""
+    translations = await async_get_translations(
+        hass, hass.config.language, "exceptions", [DOMAIN]
+    )
+    prefix = f"component.{DOMAIN}.exceptions"
+    texts = {
+        key: translations.get(f"{prefix}.{key}.message", key)
+        for key in REPORT_TEXT_KEYS
+    }
+    fmt_data = msg["format"]
+    fmt = PdfFormat(
+        decimal=fmt_data["decimal"],
+        group=fmt_data["group"],
+        months=tuple(fmt_data.get("months") or MONTHS_EN),
+        currency=fmt_data.get("currency") or None,
+    )
+    vehicle = coord.vehicles.get(msg.get("vehicle_id") or "")
+    tariff = coord.tariffs.get(msg.get("tariff_id") or "")
+    context = ReportContext(
+        currency=hass.config.currency,
+        created=dt_util.now().date(),
+        tz=dt_util.get_default_time_zone(),
+        vehicle_name=vehicle.name if vehicle else None,
+        tariff_name=tariff.name if tariff else None,
+        note=msg.get("note"),
+        vehicle_names={v_id: v.name for v_id, v in coord.vehicles.items()},
+        tariff_names={t_id: t.name for t_id, t in coord.tariffs.items()},
+    )
+    pdf = await hass.async_add_executor_job(report_pdf, result, texts, fmt, context)
+    return report_filename(result.period, context.vehicle_name), pdf
 
 
 async def async_export(
