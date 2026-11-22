@@ -15,6 +15,8 @@ by hand from the receipt or the charging provider's app.
 What it does **not** do: estimate energy from the car's state of charge,
 control charging, talk to charging provider APIs, or keep a driver's log.
 
+![Charging log page with tariff statistics and the booking form](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/ladungen-uebersicht.png)
+
 ## Installation
 
 Requires Home Assistant 2025.4 or newer. The integration icon is shown from
@@ -132,6 +134,10 @@ and `>`), the vehicle's statistics and a list of the sessions. Tap a
 session to correct or delete it. Without vehicles it links to the
 integration settings.
 
+![Monthly chart of energy and cost per charging day](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/ladungen-statistik-diagram.png)
+
+![Vehicle statistics with cost and consumption per 100 km and the last session](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/statistik-fahrzeug.png)
+
 The tariff statistics show per month and tariff (all vehicles together): sessions, kWh, cost, monthly fee and the **savings** of the
 subscription, i.e. energy × reference price − cost − monthly fee. Sessions
 of a charge type without a reference price count without savings; the
@@ -142,6 +148,8 @@ The download button in the header of a vehicle's session list exports its
 sessions and monthly fees of a chosen period as a CSV file. It opens directly
 in Excel: with a decimal comma (e.g. German) the cells are separated by `;`,
 otherwise by `,`.
+
+![Session list with SoC column and the upload and download buttons](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/ladungen-liste.png)
 
 The upload button next to it imports such a file into the vehicle, e.g. to
 restore a backup, move to a new installation or bring back sessions you
@@ -165,7 +173,9 @@ least one of the selected sessions. Sessions
 of a charge type without a price in a tariff count with their actual cost.
 Nothing is stored.
 
-**Report:** The report button left of it summarizes a year or a month:
+![Tariff comparison dialog](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/vergleich-ladetarife.png)
+
+**Report:** The report button left of the scales button summarizes a year or a month:
 sessions, energy, cost with monthly fees, average price per kWh and the
 energy charged for free, then tables per month (or per day), per tariff,
 AC/DC and per vehicle, optionally with all sessions. Filter by vehicle,
@@ -233,6 +243,8 @@ on the first start, so there is nothing to re-enter. Use them in a
 instead of the total sensors. The total sensors themselves are unchanged and
 keep their previous statistics. Deleting a vehicle deletes its statistics.
 They need the recorder, which is enabled by default.
+
+![Statistics graph card with the charging cost per month and vehicle](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/sensor-ladekosten-statistik.png)
 
 The statistic ID is made from the name (e.g.
 `ev_charge_log:byd_seal_u_charging_cost`), because the statistic picker of
