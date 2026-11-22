@@ -12,8 +12,10 @@ by hand from the receipt or the charging provider's app.
   price of 0
 - Currency comes from your Home Assistant configuration
 
-What it does **not** do: estimate energy from the car's state of charge,
-control charging, talk to charging provider APIs, or keep a driver's log.
+What it does **not** do: take the charged energy from your vehicle
+integration (if you have no kWh value, it can calculate it from a start and
+end SoC you enter by hand, see *Energy from SoC*), control charging, talk to
+charging provider APIs, or keep a driver's log.
 
 ![Charging log page with tariff statistics and the booking form](https://raw.githubusercontent.com/marc-schieferdecker/ev_charge_log/main/docs/images/ladungen-uebersicht.png)
 
@@ -63,8 +65,9 @@ Two entries are created:
   prices from a date**. Sessions are booked with the prices valid on their
   day, so a session you enter later for an earlier date still gets the old
   price. Already booked sessions never change.
-- **Vehicles** – add your vehicles, optionally with battery capacity (used
-  only for display values), a default tariff, an odometer sensor (for the
+- **Vehicles** – add your vehicles, optionally with battery capacity and
+  charging loss for AC and DC (for display values and the energy from SoC),
+  a default tariff, an odometer sensor (for the
   cost per 100 km) and the entities for the charge reminder.
 
 ## Charge reminder (optional)
