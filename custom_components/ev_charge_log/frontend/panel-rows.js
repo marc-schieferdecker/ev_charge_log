@@ -1,5 +1,6 @@
 // Custom entity rows of the EV Charge Log panel: both SoC fields side by
-// side and a sensor row with an extra value in brackets.
+// side, a sensor row with an extra value in brackets and the note row
+// without placeholder.
 
 export const SOC_ROW = "ev-charge-log-soc-row";
 export const EXTRA_ROW = "ev-charge-log-extra-row";
@@ -239,4 +240,91 @@ class EvChargeLogExtraRow extends HTMLElement {
 }
 if (!customElements.get(EXTRA_ROW)) {
   customElements.define(EXTRA_ROW, EvChargeLogExtraRow);
+}
+
+// Text entity row like Home Assistant's own (hui-text-entity-row: a
+// hui-generic-entity-row with hide-name and a text field labelled with the
+// name), but without its placeholder "(empty value)": in the booking form an
+// empty note is the normal case, not something to point out.
+export const NOTE_ROW = "ev-charge-log-note-row";
+
+class EvChargeLogNoteRow extends HTMLElement {
+  setConfig(config) {
+    if (!config || !config.entity) {
+      throw new Error("entity is required");
+    }
+    this._config = config;
+    this._row = null;
+    this.innerHTML = "";
+    this._update();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._update();
+  }
+
+  async _update() {
+    if (!this._config || !this._hass) return;
+    if (!this._row) {
+      if (this._building) return;
+      this._building = true;
+      const [tag] = await Promise.all([
+        fieldTag(),
+        customElements.whenDefined("hui-generic-entity-row"),
+      ]);
+      this._building = false;
+      if (this._row) return;
+      const row = document.createElement("hui-generic-entity-row");
+      row.config = { entity: this._config.entity, name: this._config.name };
+      row.setAttribute("hide-name", "");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      const input = document.createElement(tag);
+      input.style.width = "100%";
+      input.addEventListener("focusin", () => (this._editing = true));
+      input.addEventListener("focusout", () => {
+        this._editing = false;
+        this._update();
+      });
+      input.addEventListener("change", () => this._save());
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") input.blur();
+      });
+      row.appendChild(input);
+      this.appendChild(row);
+      this._row = row;
+      this._input = input;
+    }
+    const hass = this._hass;
+    this._row.hass = hass;
+    const state = hass.states[this._config.entity];
+    if (!state) return;
+    const input = this._input;
+    input.label = this._config.name || hass.formatEntityName?.(state) || state.entity_id;
+    input.disabled = state.state === "unavailable";
+    if (state.attributes.max) {
+      input.maxlength = state.attributes.max; // ha-input
+      input.maxLength = state.attributes.max; // ha-textfield
+    }
+    // Leave the field alone while it is being edited.
+    if (!this._editing) {
+      const value = ["unknown", "unavailable"].includes(state.state) ? "" : state.state;
+      if (input.value !== value) input.value = value;
+    }
+  }
+
+  _save() {
+    const state = this._hass.states[this._config.entity];
+    const value = this._input.value ?? "";
+    if (!state || value === state.state) return;
+    this._hass.callService("text", "set_value", {
+      entity_id: this._config.entity,
+      value,
+    });
+    this._input.blur();
+  }
+}
+if (!customElements.get(NOTE_ROW)) {
+  customElements.define(NOTE_ROW, EvChargeLogNoteRow);
 }

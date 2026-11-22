@@ -18,7 +18,7 @@ const load = (name) =>
   import(new URL(`./${name}.js?v=${MODULE_VERSION}`, import.meta.url).href);
 const [
   { STYLE },
-  { SOC_ROW, EXTRA_ROW },
+  { SOC_ROW, EXTRA_ROW, NOTE_ROW },
   { dialogMethods },
   { compareMethods },
   { chartMethods },
@@ -233,7 +233,8 @@ class EvChargeLogPanel extends HTMLElement {
     content.append(topWrap, columns);
 
     // Short row names; without a name the entity's own name is used. The SoC
-    // row is our own row element with both fields side by side.
+    // row is our own row element with both fields side by side, the note row
+    // our own text row without Home Assistant's placeholder "(empty value)".
     const row = (r) => {
       if (r.type === "soc") {
         return {
@@ -254,6 +255,9 @@ class EvChargeLogPanel extends HTMLElement {
           name: r.name,
           extra: r.extra,
         };
+      }
+      if (r.entity.startsWith("text.")) {
+        return { type: `custom:${NOTE_ROW}`, entity: r.entity, name: r.name };
       }
       return r.name ? { entity: r.entity, name: r.name } : r.entity;
     };

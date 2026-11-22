@@ -59,8 +59,9 @@ warning from `ev-charge-log` counts as a failure.
       charge type.
 - [ ] SoC row: type start and end, then empty a field. The value is
       removed.
-- [ ] Note (last field): type a note and book. The session shows the note
-      in its dialog, and the field is empty again.
+- [ ] Note (last field): empty, it shows only the label "Note", no
+      "(empty value)". Type a note and book. The session shows the note in
+      its dialog, and the field is empty again.
 - [ ] "Book" without amount and without tariff shows the translated error
       below the button.
 - [ ] A valid booking shows "✓ Booked", the fields are reset, and chart,
