@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,18 @@ def test_panel_module_exists() -> None:
     source = module.read_text(encoding="utf-8")
     assert f'customElements.define("{PANEL_COMPONENT}"' in source
     assert '"ev_charge_log/panel"' in source
+
+
+def test_panel_parts_exist() -> None:
+    """Every part the panel module loads is shipped next to it."""
+    frontend_dir = (
+        Path(__file__).parent.parent / "custom_components/ev_charge_log/frontend"
+    )
+    source = (frontend_dir / "ev-charge-log-panel.js").read_text(encoding="utf-8")
+    parts = re.findall(r'load\("([\w-]+)"\)', source)
+    assert parts
+    for part in parts:
+        assert (frontend_dir / f"{part}.js").is_file(), part
 
 
 async def test_notification_links_to_panel(hass: HomeAssistant) -> None:
